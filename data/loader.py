@@ -56,48 +56,48 @@ WHERE contract_line_state = 2;
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PRODUCTION REDSHIFT BLOCK
-# Uncomment this entire block when VPN access is available and set
-# DATA_SOURCE=redshift in your .env file.
+# Active. Requires REDSHIFT_HOST/PORT/DB/USER/PASSWORD in .env and
+# DATA_SOURCE=redshift.
 # ─────────────────────────────────────────────────────────────────────────────
-# @st.cache_data(ttl=86400)
-# def _load_from_redshift() -> pd.DataFrame:
-#     """Pull active contract lines from the Redshift gold layer.
-#
-#     Connects using credentials from environment variables, executes the
-#     contract line query, and returns the result as a typed DataFrame.
-#
-#     Returns:
-#         pd.DataFrame: Contract line records with correct column types.
-#
-#     Raises:
-#         redshift_connector.Error: On connection or query failure.
-#     """
-#     import redshift_connector  # noqa: PLC0415
-#
-#     logger.info("Connecting to Redshift at %s", os.getenv("REDSHIFT_HOST"))
-#     conn = redshift_connector.connect(
-#         host=os.environ["REDSHIFT_HOST"],
-#         port=int(os.getenv("REDSHIFT_PORT", "5439")),
-#         database=os.environ["REDSHIFT_DB"],
-#         user=os.environ["REDSHIFT_USER"],
-#         password=os.environ["REDSHIFT_PASSWORD"],
-#     )
-#     try:
-#         cursor = conn.cursor()
-#         cursor.execute(_SQL_QUERY)
-#         df: pd.DataFrame = cursor.fetch_dataframe()
-#     finally:
-#         conn.close()
-#
-#     # CRITICAL: Redshift may return GTIN as numeric, silently dropping leading
-#     # zeros. Force to string immediately after fetch.
-#     df["global_trade_item_number"] = df["global_trade_item_number"].astype(str)
-#
-#     # Ensure on_hold is a proper boolean regardless of Redshift driver casting.
-#     df["on_hold"] = df["on_hold"].astype(bool)
-#
-#     logger.info("Loaded %d contract lines from Redshift.", len(df))
-#     return df
+@st.cache_data(ttl=86400)
+def _load_from_redshift() -> pd.DataFrame:
+    """Pull active contract lines from the Redshift gold layer.
+
+    Connects using credentials from environment variables, executes the
+    contract line query, and returns the result as a typed DataFrame.
+
+    Returns:
+        pd.DataFrame: Contract line records with correct column types.
+
+    Raises:
+        redshift_connector.Error: On connection or query failure.
+    """
+    import redshift_connector  # noqa: PLC0415
+
+    logger.info("Connecting to Redshift at %s", os.getenv("REDSHIFT_HOST"))
+    conn = redshift_connector.connect(
+        host=os.environ["REDSHIFT_HOST"],
+        port=int(os.getenv("REDSHIFT_PORT", "5439")),
+        database=os.environ["REDSHIFT_DB"],
+        user=os.environ["REDSHIFT_USER"],
+        password=os.environ["REDSHIFT_PASSWORD"],
+    )
+    try:
+        cursor = conn.cursor()
+        cursor.execute(_SQL_QUERY)
+        df: pd.DataFrame = cursor.fetch_dataframe()
+    finally:
+        conn.close()
+
+    # CRITICAL: Redshift may return GTIN as numeric, silently dropping leading
+    # zeros. Force to string immediately after fetch.
+    df["global_trade_item_number"] = df["global_trade_item_number"].astype(str)
+
+    # Ensure on_hold is a proper boolean regardless of Redshift driver casting.
+    df["on_hold"] = df["on_hold"].astype(bool)
+
+    logger.info("Loaded %d contract lines from Redshift.", len(df))
+    return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -517,15 +517,7 @@ def _load_mock_data_fallback() -> pd.DataFrame:
 def _fetch_fresh_data(source: str) -> pd.DataFrame:
     """Fetch fresh data directly from the active source."""
     if source == "redshift":
-        # Note: if Redshift block is still commented out, this will raise a NameError.
-        # The user will uncomment it when VPN is ready.
-        try:
-            return _load_from_redshift()  # type: ignore
-        except NameError:
-            raise NotImplementedError(
-                "Redshift loading is not yet active. "
-                "Uncomment _load_from_redshift() in data/loader.py and remove this error."
-            )
+        return _load_from_redshift()
     elif source == "mock":
         return _load_mock_from_excel()
     else:
