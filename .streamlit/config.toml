@@ -1,0 +1,14 @@
+# Streamlit reads this file before any Python runs, so the base widget colours
+# have to be repeated here as literals. ui/theme.py remains the single source of
+# truth for everything the app actually draws — keep these four in sync with
+# PALETTE if the brand tokens ever change.
+[theme]
+base = "light"
+primaryColor = "#003C71"           # --sf-blue
+backgroundColor = "#F4F7FA"        # --sf-canvas
+secondaryBackgroundColor = "#FFFFFF"  # --sf-surface
+textColor = "#0B1F33"              # --sf-ink
+font = "sans serif"
+
+[server]
+headless = true
