@@ -10,7 +10,6 @@ build/
 *.spec
 
 # Environment
-.env
 .venv/
 venv/
 env/
