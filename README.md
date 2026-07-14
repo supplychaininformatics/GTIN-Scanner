@@ -1,4 +1,4 @@
-# 🔍 GTIN Barcode Scanner
+# GTIN Barcode Scanner
 
 A production-ready Streamlit application that modernizes a legacy Excel macro for barcode scanning in supply chain analytics. Scans a GTIN (Global Trade Item Number) from a physical barcode scanner, performs an O(1) in-memory lookup against a cached dataset of medical supply contract lines, and falls back to an external goodID API if the item isn't found locally.
 
