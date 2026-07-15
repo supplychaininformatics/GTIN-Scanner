@@ -4,17 +4,20 @@ data/loader.py
 Responsible for loading and caching the supply chain contract line dataset.
 
 Contains two distinct blocks:
-  1. PRODUCTION REDSHIFT BLOCK  — commented out, ready to activate with VPN.
-  2. LOCAL DEV MOCK BLOCK       — active by default for local development.
+  1. PRODUCTION FABRIC BLOCK — queries the Microsoft Fabric Lakehouse SQL
+     analytics endpoint over ODBC, authenticating as the signed-in Azure AD
+     user (no stored credentials).
+  2. LOCAL DEV MOCK BLOCK    — active by default for local development.
 
 The public entry point `load_contract_data()` dispatches to the correct block
-based on the DATA_SOURCE environment variable ("mock" | "redshift").
+based on the DATA_SOURCE environment variable ("mock" | "fabric").
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -28,76 +31,216 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).parent / "cache" / "contract_lines.parquet"
 
-# ── SQL Reference (kept here for parity with the production query) ────────────
-_SQL_QUERY = """
+DEFAULT_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
+DEFAULT_CONTRACT_LINE_TABLE = "[Silver_Lake].[infor].[contract_line]"
+
+# The table name is interpolated into the query rather than bound as a
+# parameter — SQL does not allow object names to be parameterised. It comes
+# from .env (same trust level as the connection string, not user input), but is
+# pattern-checked below so a typo fails loudly instead of reaching the server.
+# T-SQL allows each dotted part to be bracket-quoted (e.g. [Silver_Lake].[infor]
+# .[contract_line]), which is how Fabric's own connection-string UI writes it.
+_IDENT_PART = r"(?:\[[A-Za-z_][A-Za-z0-9_ ]*\]|[A-Za-z_][A-Za-z0-9_]*)"
+_IDENTIFIER_RE = re.compile(rf"^{_IDENT_PART}(?:\.{_IDENT_PART}){{0,2}}$")
+
+# Fabric lakehouse column name -> canonical name used everywhere else in the
+# app (engine.LookupEngine, core.lookup, ui.components). Renaming right after
+# fetch means nothing downstream needs to know the source ever changed.
+#
+# NOTE — "manuf_name" -> "manufacturer_number" is a positional guess, not a
+# confirmed mapping: it fills the same slot the old Redshift column
+# `manufacturer_number` did (which core.lookup.py labels "Brand" in the UI),
+# but the lakehouse name suggests it might actually be a readable manufacturer
+# name rather than a number. Confirm against real rows before trusting the
+# "Brand" column in the UI.
+#
+# NOTE — there is no lakehouse counterpart to the old `low_uom_code_gtin`
+# column. That column fed engine.LookupEngine's inner-pack/each-level barcode
+# alias (see engine/lookup.py) — a worker could scan either the case barcode
+# or the individual-unit barcode inside it and both resolved to the same
+# contract line. Without it, only the case-level `gtin` barcode will resolve;
+# an inner-pack scan will silently fall through to "Not Found". This is a
+# real feature gap, not just a rename, until a source column is identified.
+_LAKEHOUSE_COLUMN_MAP = {
+    "item": "item_number",
+    "contract_uom": "uom_unit_of_measure",
+    "gtin": "global_trade_item_number",
+    "description": "item_description",
+    "description2": "item_description2",
+    "description_long": "item_description3",
+    "item_type": "item_type_state",
+    "base_uom": "low_uom_code_unit_of_measure",
+    "manuf_code": "manufacturer_code",
+    "manuf_name": "manufacturer_number",
+    "multi_use_qty": "san_multi_use_qty",
+    "line": "contract_line",
+    "hold": "on_hold",
+}
+
+# NOTE — the old Redshift query filtered `WHERE contract_line_state = 2`
+# (active lines only). This table has no equivalent column, so this query is
+# currently unfiltered — it will return every contract line, including any
+# inactive/historical/discontinued ones the old filter excluded. Confirm
+# whether that's intended, or whether an active-only filter needs to be added
+# once the right column is known.
+_SQL_TEMPLATE = """
 SELECT
-    item_number,
+    item,
     vendor_item,
     implantable,
     base_cost,
-    uom_unit_of_measure,
-    global_trade_item_number,
-    item_description,
-    item_description2,
-    item_description3,
-    item_type_state,
-    low_uom_code_unit_of_measure,
-    low_uom_code_gtin,
-    manufacturer_code,
-    manufacturer_number,
-    san_multi_use_qty,
+    contract_uom,
+    gtin,
+    description,
+    description2,
+    description_long,
+    item_type,
+    base_uom,
+    manuf_code,
+    manuf_name,
+    multi_use_qty,
     contract,
-    contract_line,
-    on_hold
-FROM gold.fsm_contractline
-WHERE contract_line_state = 2;
+    line,
+    hold
+FROM {table}
 """
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PRODUCTION REDSHIFT BLOCK
-# Active. Requires REDSHIFT_HOST/PORT/DB/USER/PASSWORD in .env and
-# DATA_SOURCE=redshift.
+# PRODUCTION FABRIC LAKEHOUSE BLOCK
+# Requires FABRIC_SQL_ENDPOINT + FABRIC_DATABASE in .env, DATA_SOURCE=fabric,
+# the `fabric` extra installed (pyodbc), and the Microsoft ODBC driver
+# installed at system level. See README → "Switching to the Fabric Lakehouse".
 # ─────────────────────────────────────────────────────────────────────────────
-@st.cache_data(ttl=86400)
-def _load_from_redshift() -> pd.DataFrame:
-    """Pull active contract lines from the Redshift gold layer.
+def _contract_line_query() -> str:
+    """Build the contract line query against the configured lakehouse table."""
+    table = os.getenv("FABRIC_TABLE", DEFAULT_CONTRACT_LINE_TABLE).strip()
+    if not _IDENTIFIER_RE.match(table):
+        raise ValueError(
+            f"FABRIC_TABLE={table!r} is not a valid SQL object name. "
+            "Expected something like 'schema.table' or 'db.schema.table'."
+        )
+    return _SQL_TEMPLATE.format(table=table)
 
-    Connects using credentials from environment variables, executes the
-    contract line query, and returns the result as a typed DataFrame.
+
+def _fabric_connection_string() -> str:
+    """Assemble the ODBC connection string for the Fabric SQL analytics endpoint.
+
+    Auth is Azure AD, driven by FABRIC_AUTH:
+      * ActiveDirectoryInteractive (default) — opens a browser sign-in prompt on
+        the machine running this process. Fine for a locally-run Streamlit app;
+        it cannot work on a headless server, since nobody is there to click.
+      * ActiveDirectoryDeviceCode — prints a code to sign in with on any device.
+        Use this if the browser popup can't open (headless, SSH, some Macs).
+      * ActiveDirectoryDefault — reuses an existing Azure CLI / VS Code login,
+        or a managed identity when deployed. No prompt at all.
+
+    No password is ever read or stored, in any of these modes.
+    """
+    server = os.environ["FABRIC_SQL_ENDPOINT"]
+    database = os.environ["FABRIC_DATABASE"]
+    driver = os.getenv("FABRIC_ODBC_DRIVER", DEFAULT_ODBC_DRIVER)
+    authentication = os.getenv("FABRIC_AUTH", "ActiveDirectoryInteractive")
+
+    return (
+        f"Driver={{{driver}}};"
+        f"Server={server},1433;"
+        f"Database={database};"
+        f"Authentication={authentication};"
+        "Encrypt=Yes;"
+        "TrustServerCertificate=No;"
+        "Connection Timeout=60;"
+    )
+
+
+@st.cache_data(ttl=86400)
+def _load_from_lakehouse() -> pd.DataFrame:
+    """Pull active contract lines from the Fabric Lakehouse gold layer.
+
+    Connects to the SQL analytics endpoint as the signed-in Azure AD user,
+    executes the contract line query, and returns a typed DataFrame.
 
     Returns:
         pd.DataFrame: Contract line records with correct column types.
 
     Raises:
-        redshift_connector.Error: On connection or query failure.
+        RuntimeError: If pyodbc or the system ODBC driver is not installed.
+        pyodbc.Error: On connection or query failure.
     """
-    import redshift_connector  # noqa: PLC0415
+    try:
+        import pyodbc  # noqa: PLC0415
+    except ImportError as e:
+        raise RuntimeError(
+            "pyodbc is not installed. Run: pip install -e '.[fabric]'"
+        ) from e
 
-    logger.info("Connecting to Redshift at %s", os.getenv("REDSHIFT_HOST"))
-    conn = redshift_connector.connect(
-        host=os.environ["REDSHIFT_HOST"],
-        port=int(os.getenv("REDSHIFT_PORT", "5439")),
-        database=os.environ["REDSHIFT_DB"],
-        user=os.environ["REDSHIFT_USER"],
-        password=os.environ["REDSHIFT_PASSWORD"],
-    )
+    endpoint = os.environ["FABRIC_SQL_ENDPOINT"]
+    logger.info("Connecting to Fabric SQL analytics endpoint at %s", endpoint)
+
+    try:
+        conn = pyodbc.connect(_fabric_connection_string())
+    except pyodbc.InterfaceError as e:
+        # IM002 means the ODBC *driver* is missing — a system-level install that
+        # pip cannot do for you. It is by far the most common first-run failure,
+        # and the raw driver message does not say how to fix it.
+        if "IM002" in str(e):
+            raise RuntimeError(
+                f"ODBC driver {os.getenv('FABRIC_ODBC_DRIVER', DEFAULT_ODBC_DRIVER)!r} "
+                "is not installed. Install the Microsoft ODBC Driver 18 for SQL Server "
+                "(see README → 'Switching to the Fabric Lakehouse'), then retry."
+            ) from e
+        raise
+
     try:
         cursor = conn.cursor()
-        cursor.execute(_SQL_QUERY)
-        df: pd.DataFrame = cursor.fetch_dataframe()
+        cursor.execute(_contract_line_query())
+        columns = [col[0] for col in cursor.description]
+        rows = [tuple(row) for row in cursor.fetchall()]
     finally:
         conn.close()
 
-    # CRITICAL: Redshift may return GTIN as numeric, silently dropping leading
-    # zeros. Force to string immediately after fetch.
+    df = pd.DataFrame.from_records(rows, columns=columns)
+    df = df.rename(columns=_LAKEHOUSE_COLUMN_MAP)
+
+    # CRITICAL: GTINs are identifiers, not numbers. If the endpoint hands one
+    # back as numeric, the leading zeros are already gone ("00801741030024"
+    # becomes 801741030024) and every lookup for that item misses. Force to
+    # string immediately after fetch.
     df["global_trade_item_number"] = df["global_trade_item_number"].astype(str)
 
-    # Ensure on_hold is a proper boolean regardless of Redshift driver casting.
-    df["on_hold"] = df["on_hold"].astype(bool)
+    # on_hold may arrive as a BIT, an int, or a string depending on the column's
+    # lakehouse type. Note a plain .astype(bool) would turn NULL into True.
+    df["on_hold"] = _coerce_bool(df["on_hold"])
 
-    logger.info("Loaded %d contract lines from Redshift.", len(df))
+    logger.info("Loaded %d contract lines from Fabric Lakehouse.", len(df))
     return df
+
+
+_TRUTHY = frozenset({"true", "1", "t", "yes", "y"})
+
+
+def _coerce_bool(series: pd.Series) -> pd.Series:
+    """Coerce a boolean-ish column to real bools, treating NULL/blank as False.
+
+    on_hold reaches us as a bool, an int/BIT, or a string depending on the
+    source (Excel hands back "true"/"false" text; a lakehouse BIT arrives
+    numeric). Two traps this exists to avoid:
+
+      * `.astype(bool)` on strings is always True — bool("false") is True,
+        because it is a non-empty string. That silently flags every item as
+        on-hold.
+      * Branching on `dtype == object` to detect strings is a pandas-2 idiom.
+        Under pandas 3, string columns have dtype `str`, so the check is False
+        and execution falls into exactly the `.astype(bool)` trap above.
+
+    So: dispatch on pandas' type API, never on `== object`, and compare strings
+    by value.
+    """
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False).astype(bool)
+    if pd.api.types.is_numeric_dtype(series):
+        return series.fillna(0) != 0
+    return series.astype("string").str.strip().str.lower().isin(_TRUTHY)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +252,7 @@ def _load_from_redshift() -> pd.DataFrame:
 def _load_mock_data_fallback() -> pd.DataFrame:
     """Load a representative sample from the real contract_line.xlsx dataset.
 
-    Mirrors the exact column set returned by the Redshift production query.
+    Mirrors the exact column set returned by the Fabric production query.
     GTINs are stored as strings to preserve leading zeros.
     NaN values from the Excel source are represented as None.
 
@@ -516,19 +659,19 @@ def _load_mock_data_fallback() -> pd.DataFrame:
 
 def _fetch_fresh_data(source: str) -> pd.DataFrame:
     """Fetch fresh data directly from the active source."""
-    if source == "redshift":
-        return _load_from_redshift()
+    if source == "fabric":
+        return _load_from_lakehouse()
     elif source == "mock":
         return _load_mock_from_excel()
     else:
-        raise ValueError(f"Unknown DATA_SOURCE={source!r}. Expected 'mock' or 'redshift'.")
+        raise ValueError(f"Unknown DATA_SOURCE={source!r}. Expected 'mock' or 'fabric'.")
 
 def _load_mock_from_excel() -> pd.DataFrame:
     """Load the full 130K row mock dataset from the user's local Excel file.
     Falls back to the 20-row sample if the Excel file is missing.
     """
-    excel_path = "/Users/anushkasirpurkar/Downloads/contract_line.xlsx"
-    if not os.path.exists(excel_path):
+    excel_path = Path.home() / "Downloads" / "contract_line.xlsx"
+    if not excel_path.exists():
         logger.warning("Excel file %s not found. Falling back to 20-row mock data.", excel_path)
         return _load_mock_data_fallback()
 
@@ -537,11 +680,7 @@ def _load_mock_from_excel() -> pd.DataFrame:
     df = df.drop(columns=['key'], errors='ignore')
 
     df["global_trade_item_number"] = df["global_trade_item_number"].astype(str)
-    if df["on_hold"].dtype == object:
-        df["on_hold"] = df["on_hold"].astype(str).str.lower() == 'true'
-    else:
-        df["on_hold"] = df["on_hold"].astype(bool)
-        
+    df["on_hold"] = _coerce_bool(df["on_hold"])
     df["base_cost"] = df["base_cost"].astype(float)
     df["san_multi_use_qty"] = pd.to_numeric(df["san_multi_use_qty"], errors='coerce').fillna(0).astype(int)
     df["contract_line"] = pd.to_numeric(df["contract_line"], errors='coerce').fillna(0).astype(int)
@@ -551,14 +690,15 @@ def _load_mock_from_excel() -> pd.DataFrame:
 
 # ─── Public Router ────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=86400, show_spinner="Fetching contract data from Redshift…")
+@st.cache_data(ttl=86400, show_spinner="Fetching contract data…")
 def load_contract_data() -> pd.DataFrame:
     """Load contract line data, preferring a local Parquet cache over live query.
-    
+
     Checks if `data/cache/contract_lines.parquet` exists and is <24h old.
     If so, returns it instantly.
-    Otherwise, queries Redshift (or the mock source), saves to Parquet, and returns.
-    If the query fails but a stale Parquet file exists, it uses the stale file as a fallback.
+    Otherwise, queries the Fabric Lakehouse (or the mock source), saves to Parquet,
+    and returns. If the query fails but a stale Parquet file exists, it uses the
+    stale file as a fallback.
 
     Returns:
         pd.DataFrame: Contract line records.

@@ -17,7 +17,7 @@ gtin-scanner/
 │   ├── session.py            # Session state + scan history model
 │   └── export.py             # Excel writer
 ├── data/
-│   └── loader.py             # Redshift (commented) + Mock data (active)
+│   └── loader.py             # Fabric Lakehouse + Mock data (active by default)
 ├── engine/
 │   └── lookup.py             # O(1) dict-indexed GTIN lookup
 ├── api/
@@ -87,7 +87,7 @@ pip install -e .
 cp .env.example .env
 ```
 
-Open `.env` and fill in values as needed. For local development the defaults work out of the box — `DATA_SOURCE=mock` is active and no Redshift credentials are required.
+Open `.env` and fill in values as needed. For local development the defaults work out of the box — `DATA_SOURCE=mock` is active and no database access is required.
 
 ---
 
@@ -115,36 +115,71 @@ Open **http://localhost:8501** in your browser.
 
 ---
 
-## Switching to Production Redshift
+## Switching to the Fabric Lakehouse
 
-When VPN access is available:
+Production data lives in a Microsoft Fabric Lakehouse. The app reaches it through
+the lakehouse's **SQL analytics endpoint** — a SQL-Server-style (TDS) connection
+over ODBC, authenticated with your own Azure AD identity. **No password is stored
+anywhere**, which is why `.env` is safe to keep in version control.
 
-### 1. Install the Redshift driver
+### 1. Install the Microsoft ODBC driver (system-level)
+
+`pip` cannot do this one — the driver is a system package from Microsoft.
 
 ```bash
-pip install -e ".[production]"
+# macOS
+brew tap microsoft/mssql-release https://github.com/Microsoft/homebrew-mssql-release
+brew install msodbcsql18
+
+# Windows — download and run the installer:
+# https://learn.microsoft.com/sql/connect/odbc/download-odbc-driver-for-sql-server
 ```
 
-### 2. Update `.env`
+Verify it registered: `odbcinst -q -d` (macOS/Linux), or check *ODBC Data Sources*
+→ *Drivers* (Windows). You should see `ODBC Driver 18 for SQL Server`.
+
+### 2. Install the Python driver
+
+```bash
+pip install -e ".[fabric]"
+```
+
+### 3. Fill in `.env`
+
+Get the endpoint and lakehouse name from the Fabric workspace:
+**Lakehouse → "SQL analytics endpoint" → Settings → Connection string**.
 
 ```dotenv
-DATA_SOURCE=redshift
+DATA_SOURCE=fabric
 
-REDSHIFT_HOST=your-cluster.region.redshift.amazonaws.com
-REDSHIFT_PORT=5439
-REDSHIFT_DB=your_database
-REDSHIFT_USER=your_user
-REDSHIFT_PASSWORD=your_password
+FABRIC_SQL_ENDPOINT=xxxxx.datawarehouse.fabric.microsoft.com
+FABRIC_DATABASE=your_lakehouse_name
+FABRIC_TABLE=[Silver_Lake].[infor].[contract_line]
+FABRIC_AUTH=ActiveDirectoryInteractive
 ```
 
-### 3. Uncomment the Redshift block in `data/loader.py`
+`FABRIC_TABLE` accepts a bracket-quoted `[db].[schema].[table]` name (T-SQL
+style) or a plain `schema.table`. If the lakehouse ever renames the
+contract-line table or view, update it here — the SQL itself does not need
+editing.
 
-Open [`data/loader.py`](data/loader.py) and:
+> **Before flipping `DATA_SOURCE=fabric` for real use:** three open questions
+> about this table's schema — a column-mapping guess, a dropped barcode-alias
+> feature, and a dropped active-line filter — are tracked in
+> [FABRIC_TODO.md](FABRIC_TODO.md). Resolve those first.
 
-- **Uncomment** the `_load_from_redshift()` function (lines marked `PRODUCTION REDSHIFT BLOCK`).
-- **Remove** the `NotImplementedError` inside `load_contract_data()` and uncomment the `return _load_from_redshift()` line.
+### 4. Run it
 
-The data cache TTL is set to **24 hours** via `@st.cache_data(ttl=86400)`, so Redshift is queried at most once per day per server instance.
+On the first query a **browser window opens for Azure AD sign-in**. That is
+`ActiveDirectoryInteractive` doing its job. Two consequences worth knowing:
+
+- The sign-in prompt appears on **the machine running the Python process**, not
+  in the user's browser tab. This works when you run Streamlit locally. It
+  cannot work on a headless/shared server — nobody is there to click. If you
+  deploy this app, switch `FABRIC_AUTH` to `ActiveDirectoryDefault` (reuses an
+  `az login` session or a managed identity) or `ActiveDirectoryDeviceCode`.
+- You will be prompted at most **once per day**: results are written to
+  `data/cache/contract_lines.parquet` and reused for 24 hours.
 
 ---
 
@@ -169,7 +204,7 @@ No `.env` changes are needed for the goodID integration. It works out of the box
 | Synchronous `httpx.Client` | Streamlit's execution model is synchronous. `asyncio.run()` inside Streamlit causes event-loop conflicts. Sync client avoids this entirely. |
 | No auth on goodID API | The FDA AccessGUDID is a fully public API — no token, no OAuth, no rate limiting for typical use. |
 | GTIN stored as `str`, no normalisation | Leading zeros are preserved exactly as scanned. No `lstrip("0")` or zero-padding — the GTIN in the DB and the scanner output must match as-is. |
-| `@st.cache_data(ttl=86400)` | Redshift is hit at most once per day. The mock loader uses the same decorator so switching data sources requires zero refactoring. |
+| `@st.cache_data(ttl=86400)` | The lakehouse is hit at most once per day — which also means the Azure AD sign-in prompt appears at most once per day. The mock loader uses the same decorator so switching data sources requires zero refactoring. |
 | Session history in `st.session_state` | History persists for the browser session lifetime and resets on page refresh — matching the expected workflow of a warehouse scanning station. |
 
 ---
@@ -182,7 +217,7 @@ No `.env` changes are needed for the goodID integration. It works out of the box
 | `pandas` | ≥ 2.0 | DataFrame for cached contract line data |
 | `python-dotenv` | ≥ 1.0 | `.env` file loading |
 | `httpx` | ≥ 0.27 | Synchronous HTTP client for goodID API |
-| `redshift_connector` | ≥ 2.1 | *(optional, production only)* Redshift connection |
+| `pyodbc` | ≥ 5.1 | *(optional, production only)* Fabric Lakehouse connection. Also needs the Microsoft ODBC driver installed at system level. |
 
 ---
 

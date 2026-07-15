@@ -10,7 +10,7 @@ parsing, the same local-cache-then-API order, the same field mappings.
 The heavy lifting still belongs to the existing packages, untouched:
   * engine.LookupEngine  — O(1) in-memory GTIN index
   * api.query_goodid     — AccessGUDID HTTP fallback
-  * data.load_contract_data — parquet/Redshift loader with a 24h TTL
+  * data.load_contract_data — parquet/Fabric Lakehouse loader with a 24h TTL
 
 The only structural change is that resolution no longer writes to
 st.session_state directly. `resolve_scan()` returns the result and lets the
@@ -25,6 +25,7 @@ import re
 from collections.abc import Callable
 from datetime import datetime
 
+import pandas as pd
 import streamlit as st
 
 from api import GoodIDResult, query_goodid
@@ -32,6 +33,8 @@ from data import load_contract_data
 from engine import LookupEngine
 
 logger = logging.getLogger(__name__)
+
+_MISSING = "-"
 
 # Canonical status keys. The UI maps these to colour/pill/icon; the Excel export
 # continues to use the legacy emoji `status` string so its output is unchanged.
@@ -57,6 +60,24 @@ def get_lookup_engine() -> LookupEngine:
     engine = LookupEngine(df)
     logger.info("LookupEngine ready with %d entries.", engine.size)
     return engine
+
+
+def _field(record: dict, key: str) -> str:
+    """Pull a display field from a contract-line record.
+
+    `record` is a DataFrame row's `.to_dict()` (see engine.LookupEngine), so a
+    blank source cell — Excel today, the Fabric lakehouse next — arrives as a
+    real NaN, not a missing key. `record.get(key, default)` therefore returns
+    the NaN itself rather than the default, and NaN is truthy, so it stringifies
+    straight through to the literal text "nan". Route every record-sourced
+    field through this instead so gaps render as "-", matching the sibling
+    Lawson/HIBCC fields already using that convention in the same table.
+    """
+    value = record.get(key)
+    if pd.isna(value):
+        return _MISSING
+    text = str(value).strip()
+    return text or _MISSING
 
 
 def extract_gtin(scanned_code: str) -> str:
@@ -97,26 +118,25 @@ def resolve_scan(
         logger.info("Cache HIT for GTIN %s", gtin)
         full_record = {
             "Scan": raw_gtin,
-            "Item": record.get("vendor_item", ""),
-            "Company": record.get("manufacturer_code", ""),
-            "Brand": record.get("manufacturer_number", ""),
+            "Item": _field(record, "vendor_item"),
+            "Company": _field(record, "manufacturer_code"),
+            "Brand": _field(record, "manufacturer_number"),
             "Description": " ".join(
                 str(x)
-                for x in filter(
-                    None,
-                    [
-                        record.get("item_description"),
-                        record.get("item_description2"),
-                        record.get("item_description3"),
-                    ],
+                for x in (
+                    record.get("item_description"),
+                    record.get("item_description2"),
+                    record.get("item_description3"),
                 )
-            ),
+                if not pd.isna(x) and str(x).strip()
+            )
+            or _MISSING,
             "GTIN": gtin,
-            "GTIN UOM": record.get("uom_unit_of_measure", ""),
-            "UOU": record.get("low_uom_code_unit_of_measure", ""),
+            "GTIN UOM": _field(record, "uom_unit_of_measure"),
+            "UOU": _field(record, "low_uom_code_unit_of_measure"),
             "HIBCC": "-",
-            "LAWSON ID": record.get("item_number", ""),
-            "Lawson UOM": record.get("low_uom_code_unit_of_measure", ""),
+            "LAWSON ID": _field(record, "item_number"),
+            "Lawson UOM": _field(record, "low_uom_code_unit_of_measure"),
         }
         on_hold = bool(record.get("on_hold"))
         return {
