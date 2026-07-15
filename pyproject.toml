@@ -20,9 +20,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-production = [
-    # Uncomment when VPN is available and switching DATA_SOURCE=redshift
-    "redshift_connector>=2.1.0",
+# Needed only for DATA_SOURCE=fabric. Kept out of the core dependencies because
+# pyodbc also requires the Microsoft ODBC driver to be installed at system
+# level, which pip cannot do — see README → "Switching to the Fabric Lakehouse".
+fabric = [
+    "pyodbc>=5.1.0",
 ]
 dev = [
     "pytest>=8.0.0",
