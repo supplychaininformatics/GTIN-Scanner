@@ -16,6 +16,7 @@ from datetime import datetime
 
 import streamlit as st
 
+from . import autosave
 from .lookup import STATUS_API, STATUS_CACHE, STATUS_HOLD, STATUS_NOT_FOUND
 
 # Full-record field names, mirrored from the flattened history-entry shape
@@ -35,10 +36,55 @@ def init_session() -> None:
         st.session_state.last_result = None
     if "sound_on" not in st.session_state:
         st.session_state.sound_on = True
+    # Set once via the pre-scan gate in app.py, then held for the rest of the
+    # browser session. Free text — whatever the picker types identifies the site.
+    if "warehouse_location" not in st.session_state:
+        st.session_state.warehouse_location = None
+    # Identifies this session's autosave file (core/autosave.py) and is carried
+    # in the URL query params so a resumed session can find its way back to it.
+    if "session_id" not in st.session_state:
+        st.session_state.session_id = None
     # Increments once per scan. The JS runtime uses it to fire an alert tone
     # exactly once per scan rather than on every incidental rerun.
     if "scan_nonce" not in st.session_state:
         st.session_state.scan_nonce = 0
+
+
+def start_session(location: str) -> None:
+    """Begin a fresh scan session under a new autosave id.
+
+    The autosave file is written immediately — before the first scan — so a
+    refresh in the window between entering the location and scanning the first
+    item can still resume from the URL's `sid` instead of dropping back to the
+    start gate. See app.py's resume gate and core/autosave.py.
+    """
+    st.session_state.warehouse_location = location
+    st.session_state.session_id = autosave.new_session_id()
+    st.session_state.scan_history = []
+    st.session_state.last_result = None
+    autosave.save_session(
+        st.session_state.session_id,
+        location,
+        st.session_state.scan_history,
+    )
+
+
+def resume_session(session_id: str, saved: dict) -> None:
+    """Rehydrate session state from a recovered autosave file."""
+    st.session_state.session_id = session_id
+    st.session_state.warehouse_location = saved["location"]
+    st.session_state.scan_history = saved["history"]
+    st.session_state.last_result = None
+
+
+def end_session() -> None:
+    """Delete this session's autosave file and reset back to the start gate."""
+    if st.session_state.session_id:
+        autosave.delete_session(st.session_state.session_id)
+    st.session_state.warehouse_location = None
+    st.session_state.session_id = None
+    st.session_state.scan_history = []
+    st.session_state.last_result = None
 
 
 def find_duplicate(gtin: str) -> dict | None:
@@ -69,6 +115,11 @@ def record_scan(result: dict) -> None:
     entry.update(result["full_record"])
     st.session_state.scan_history.append(entry)
     st.session_state.scan_nonce += 1
+    autosave.save_session(
+        st.session_state.session_id,
+        st.session_state.warehouse_location,
+        st.session_state.scan_history,
+    )
 
 
 def record_duplicate_scan(raw_gtin: str, gtin: str, existing: dict) -> None:
