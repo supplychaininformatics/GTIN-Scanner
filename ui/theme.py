@@ -279,6 +279,88 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 [data-testid="stDownloadButton"] button:focus-visible {
     box-shadow: 0 0 0 4px var(--sf-focus-ring) !important;
 }
+
+/* Admin link and End Session button — pinned to the bottom-RIGHT corner of the
+   viewport (not the document flow, so scrolling the history table never moves
+   them), side by side.
+
+   Streamlit wraps the keyed container in a full-width layout wrapper that
+   carries the surface background — that wrapper is the white box. Pin it to the
+   corner and strip every surface/box/padding from it AND the keyed block, so
+   only the two blue buttons show. The wrapper is targeted three ways
+   (:has on the parent, the parent-of-parent, and the keyed node itself) so the
+   fix holds regardless of exactly which node Streamlit puts the class on. */
+[data-testid="stLayoutWrapper"]:has(.st-key-sf_endsession),
+[data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-sf_endsession),
+.st-key-sf_endsession {
+    position: fixed !important;
+    bottom: 1.25rem;
+    right: 1.5rem;
+    left: auto !important;
+    width: 300px !important;
+    max-width: none !important;
+    z-index: 999980;
+    background: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+/* Two equal st.columns hold the buttons — keep them side by side (never
+   Streamlit's narrow-viewport stacking) and strip every nested surface. */
+.st-key-sf_endsession [data-testid="stHorizontalBlock"] {
+    flex-wrap: nowrap !important;
+    gap: .5rem !important;
+}
+.st-key-sf_endsession [data-testid="stColumn"] {
+    width: calc(50% - .25rem) !important;
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+}
+.st-key-sf_endsession [data-testid="stVerticalBlock"],
+.st-key-sf_endsession [data-testid="stElementContainer"] {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+}
+/* Both are real st.buttons now — identical styling, each fills its column, so
+   the two columns being equal makes the two buttons equal. */
+.st-key-sf_endsession [data-testid="stButton"] button {
+    width: 100% !important;
+    min-width: 0 !important;
+    background: var(--sf-blue) !important;
+    color: var(--sf-surface) !important;
+    border: 1px solid var(--sf-blue) !important;
+    border-radius: 6px !important;
+    height: 34px !important;
+    padding: 0 .75rem !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
+    font-weight: 600 !important;
+    font-size: .8125rem !important;
+    letter-spacing: .03em;
+    text-decoration: none !important;
+    transition: background 160ms ease-out, border-color 160ms ease-out;
+}
+.st-key-sf_endsession [data-testid="stButton"] button * {
+    color: inherit !important;
+    font-weight: inherit !important;
+    white-space: nowrap !important;
+}
+.st-key-sf_endsession [data-testid="stButton"] button:hover {
+    background: var(--sf-blue-hover) !important;
+    border-color: var(--sf-blue-hover) !important;
+    color: var(--sf-surface) !important;
+}
+.st-key-sf_endsession [data-testid="stButton"] button:focus-visible {
+    box-shadow: 0 0 0 4px var(--sf-focus-ring) !important;
+}
+
 [data-testid="stForm"] {
     border: none !important; padding: 0 !important; background: transparent !important;
 }
