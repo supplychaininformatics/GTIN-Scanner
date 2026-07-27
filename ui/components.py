@@ -77,20 +77,43 @@ def _logo_data_uri() -> str | None:
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
-def header_html(data_source: str, contract_lines: int, cache_ttl: str) -> str:
-    """The fixed top bar: mark, wordmark, and live session chips."""
+def _identity_block_html() -> str:
+    """Logo, wordmark and app title — the identity every page's header shares."""
     uri = _logo_data_uri()
     logo = (
         f'<div class="sf-logo-plate"><img src="{uri}" alt="Sanford Health"></div>'
         if uri
         else '<div class="sf-logo-fallback">Logo asset missing</div>'
     )
+    return (
+        f"{logo}"
+        '<div class="sf-rule"></div>'
+        '<div class="sf-wordmark">Supply Chain Informatics</div>'
+        '<div class="sf-rule"></div>'
+        f'<div class="sf-apptitle">{html.escape(APP_TITLE)}</div>'
+    )
 
+
+def identity_header_html() -> str:
+    """The bare top bar — logo, wordmark, app title, no session chips.
+
+    Used by pages that render before or without an active scan session (the
+    pre-scan gate, the admin page), so every page shows the identical banner.
+    """
+    return f'<div class="sf-header"><div class="sf-header-left">{_identity_block_html()}</div></div>'
+
+
+def header_html(
+    data_source: str, contract_lines: int, cache_ttl: str, location: str | None = None
+) -> str:
+    """The fixed top bar: identity block plus live session chips."""
     chips = [
         ("Data source", html.escape(data_source.upper())),
         ("Contract lines", f"{contract_lines:,}"),
         ("Cache TTL", html.escape(cache_ttl)),
     ]
+    if location:
+        chips.append(("Warehouse Location", html.escape(location)))
     chip_html = "".join(
         f'<div class="sf-chip"><span class="sf-chip-k">{k}</span>'
         f'<span class="sf-chip-v">{v}</span></div>'
@@ -104,13 +127,7 @@ def header_html(data_source: str, contract_lines: int, cache_ttl: str) -> str:
 
     return f"""
 <div class="sf-header">
-  <div class="sf-header-left">
-    {logo}
-    <div class="sf-rule"></div>
-    <div class="sf-wordmark">Supply Chain Informatics</div>
-    <div class="sf-rule"></div>
-    <div class="sf-apptitle">{html.escape(APP_TITLE)}</div>
-  </div>
+  <div class="sf-header-left">{_identity_block_html()}</div>
   <div class="sf-header-right">{chip_html}</div>
 </div>
 """

@@ -24,15 +24,19 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 
+from core import autosave
 from core.export import EXPORT_FILENAME, EXPORT_MIME, build_workbook
 from core.lookup import extract_gtin, get_lookup_engine, resolve_scan
 from core.session import (
     clear_result,
     compute_stats,
+    end_session,
     find_duplicate,
     init_session,
     record_duplicate_scan,
     record_scan,
+    resume_session,
+    start_session,
 )
 from ui import components as C
 from ui.theme import inject_theme, scanner_runtime
@@ -55,6 +59,47 @@ st.set_page_config(
 inject_theme()
 init_session()
 
+# ── Pre-scan gate: capture the warehouse location once per browser session ────
+# Mirrors the admin-email gate in pages/admin.py: a plain form, held in session
+# state, shown once. Free text — whoever is scanning identifies their own site,
+# there is no fixed list to maintain.
+if not st.session_state.warehouse_location:
+    # A resumed session (refresh, reconnect, server restart) carries its
+    # autosave id in the URL — session_state itself may have been wiped, but
+    # the URL survives all of those, so this is the only durable pointer back
+    # to the right file. See core/autosave.py.
+    resume_sid = st.query_params.get("sid")
+    if resume_sid:
+        saved = autosave.load_session(resume_sid)
+        if saved:
+            resume_session(resume_sid, saved)
+            st.rerun()
+        else:
+            # Stale or already-ended session — drop the dead param and fall
+            # through to a normal start gate instead of looping on it.
+            del st.query_params["sid"]
+
+    st.markdown(C.identity_header_html(), unsafe_allow_html=True)
+    st.markdown(C.section_html("Start New Session +"), unsafe_allow_html=True)
+    st.write("Enter the current warehouse location for this scan session.")
+    with st.form("location_form"):
+        location_input = st.text_input(
+            "Warehouse Location",
+            placeholder="e.g. Sioux Falls GS1",
+            label_visibility="collapsed",
+        )
+        start_submitted = st.form_submit_button("Start Session", type="primary")
+
+    if start_submitted:
+        candidate = location_input.strip()
+        if candidate:
+            start_session(candidate)
+            st.query_params["sid"] = st.session_state.session_id
+            st.rerun()
+        else:
+            st.error("Enter a warehouse location to continue.")
+    st.stop()
+
 engine = get_lookup_engine()
 
 # ── Header ────────────────────────────────────────────────────────────────────
@@ -63,9 +108,43 @@ st.markdown(
         data_source=os.getenv("DATA_SOURCE", "mock"),
         contract_lines=engine.size,
         cache_ttl="24h",
+        location=st.session_state.warehouse_location,
     ),
     unsafe_allow_html=True,
 )
+
+
+@st.dialog("End Session?")
+def _confirm_end_session() -> None:
+    """Gate on the one moment data could be lost for good: forgetting to
+    export before clearing state. Cancel leaves the session untouched."""
+    n = len(st.session_state.scan_history)
+    st.write(
+        f"This will permanently clear this session's {n} scan{'s' if n != 1 else ''} "
+        "from this device. Make sure you've downloaded the Excel export first — "
+        "this can't be undone."
+    )
+    cancel_col, end_col = st.columns(2)
+    with cancel_col:
+        if st.button("Cancel", use_container_width=True):
+            st.rerun()
+    with end_col:
+        if st.button("End Session", type="primary", use_container_width=True):
+            end_session()
+            st.query_params.clear()
+            st.rerun()
+
+
+with st.container(key="sf_endsession"):
+    # Two real buttons in equal columns — guaranteed-equal width, unlike a
+    # page_link + button pair, which are different widgets that size differently.
+    admin_col, end_col = st.columns(2)
+    with admin_col:
+        if st.button("Admin", key="sf_admin_btn", use_container_width=True):
+            st.switch_page("pages/admin.py")
+    with end_col:
+        if st.button("End Session", key="sf_end_session_btn", use_container_width=True):
+            _confirm_end_session()
 
 # The slot lives above the workspace but is filled after the scan resolves, so
 # the in-flight bar appears directly under the header where it belongs.
@@ -160,7 +239,7 @@ with right, st.container(key="sf_stage"):
             with action:
                 st.download_button(
                     label="Export Session to Excel",
-                    data=build_workbook(history),
+                    data=build_workbook(history, st.session_state.warehouse_location),
                     file_name=EXPORT_FILENAME,
                     mime=EXPORT_MIME,
                     use_container_width=True,

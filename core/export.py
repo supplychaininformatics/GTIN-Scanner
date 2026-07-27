@@ -25,10 +25,16 @@ _COLUMNS = [
 ]
 
 
-def build_workbook(history: list[dict]) -> bytes:
-    """Serialise the session scan history to an .xlsx byte string."""
+def build_workbook(history: list[dict], location: str | None = None) -> bytes:
+    """Serialise the session scan history to an .xlsx byte string.
+
+    `location` is session-level, not per-scan — the same value for every row —
+    so it isn't in `_COLUMNS`. It's inserted as the lead column when set.
+    """
     df_export = pd.DataFrame(history)
     df_export = df_export[[c for c in _COLUMNS if c in df_export.columns]]
+    if location:
+        df_export.insert(0, "Warehouse Location", location)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
