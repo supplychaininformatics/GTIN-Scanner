@@ -9,13 +9,16 @@ A production-ready Streamlit application that modernizes a legacy Excel macro fo
 ```
 gtin-scanner/
 ├── app.py                    # Streamlit entry point — layout composition only
+├── pages/
+│   └── admin.py               # Admin-only manual data refresh (email-allowlist gated)
 ├── ui/
 │   ├── theme.py              # The single CSS injection + palette + JS runtime
 │   └── components.py         # header, kpi tiles, result card, pills, tables
 ├── core/
 │   ├── lookup.py             # Scan orchestration (GS1 parse → cache → API)
 │   ├── session.py            # Session state + scan history model
-│   └── export.py             # Excel writer
+│   ├── export.py             # Excel writer
+│   └── admin.py               # Admin auth check + cache-refresh orchestration
 ├── data/
 │   └── loader.py             # Fabric Lakehouse + Mock data (active by default)
 ├── engine/
@@ -25,14 +28,17 @@ gtin-scanner/
 ├── assets/
 │   └── sanford-logo.png      # Official mark — referenced, never redrawn
 ├── .streamlit/
-│   └── config.toml           # Theme and server config
+│   ├── config.toml           # Theme and server config
+│   └── secrets.toml.example  # Template for the admin email allowlist
 ├── .env.example              # Environment variable template
 └── pyproject.toml            # Project metadata and dependencies
 ```
 
 `engine/`, `api/` and `data/` hold the lookup, API and caching logic and are
 independent of the UI. `core/` orchestrates them; `ui/` draws the result. No
-colour is hardcoded outside `ui/theme.py`.
+colour is hardcoded outside `ui/theme.py`. `pages/admin.py` is a second,
+Streamlit-multipage entry point — the scan page (`app.py`) stays the default
+page and is otherwise unchanged.
 
 **Data flow per scan:**
 
@@ -180,6 +186,82 @@ On the first query a **browser window opens for Azure AD sign-in**. That is
   `az login` session or a managed identity) or `ActiveDirectoryDeviceCode`.
 - You will be prompted at most **once per day**: results are written to
   `data/cache/contract_lines.parquet` and reused for 24 hours.
+
+---
+
+## Admin Refresh Page
+
+The 24h cache described above is deliberately passive. In the warehouse, new
+items land in `contract_line` and get scanned again **2-3 hours later, the
+same day** — so a purely passive cache means those items read as "Not Found"
+until the next day. `pages/admin.py` adds a manual "Refresh data now" button
+for exactly that gap, restricted to managers/supervisors so line staff can't
+hammer it.
+
+Works identically regardless of `DATA_SOURCE` — on `mock` it re-reads the
+Excel file, on `fabric` it re-runs the lakehouse query — so you can build and
+test the whole flow today, before ever flipping to Fabric.
+
+### Why it needs three cache layers cleared, not one
+
+A scan is served by four independent caches stacked on top of each other:
+the on-disk Parquet file (fresh for 24h by file **mtime**), `load_contract_data()`'s
+own `@st.cache_data`, `_load_from_lakehouse()`'s separate `@st.cache_data` on
+the Fabric path specifically, and `get_lookup_engine()`'s `@st.cache_resource`
+(no TTL — holds for the whole app lifetime). `core/admin.refresh_now()` clears
+all four together and rebuilds immediately, which is why "refresh" isn't just
+deleting the Parquet file — doing that alone would still serve a stale
+in-memory copy until the next server restart.
+
+### Access model: typed-email allowlist, not a verified login
+
+A visitor types their email; the page checks it against an allowlist, the
+software equivalent of a sign-in sheet — not a badge reader. **It is not
+verified identity.** Anyone who learns an allowlisted address could type it
+in and get through. That tradeoff is deliberate for now (no identity
+provider to stand up), and is offset by an audit trail: every attempt —
+granted or denied — and every refresh is logged, so misuse is visible after
+the fact even though it isn't prevented up front.
+
+If that tradeoff stops being acceptable (e.g. the allowlist leaks, or this
+needs to move to a shared/public URL), the natural upgrade is a verified
+login — Streamlit's native `st.login()` against Microsoft Entra ID, reusing
+the same Azure AD tenant as the Fabric connection. That would replace the
+`st.text_input` email check in `pages/admin.py` with `st.user.email` from a
+completed OAuth flow; `core/admin.py::is_admin()`'s allowlist check itself
+wouldn't need to change.
+
+### 1. Fill in `.streamlit/secrets.toml`
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+```
+
+List who's allowed to refresh:
+
+```toml
+[admin]
+allowed_emails = ["manager1@example.org", "supervisor2@example.org"]
+# allowed_domains = ["example.org"]   # optional: grant a whole group by domain
+```
+
+This file is git-ignored (like `data/cache/`) — without it, the allowlist is
+empty and every typed email is denied (and logged as such).
+
+### 2. Run it
+
+```bash
+streamlit run app.py
+```
+
+Visit `http://localhost:8501/admin`. A blank/non-allowlisted email shows an
+access-denied message; an allowlisted email is remembered for the browser
+session and shows the last-refresh banner, the refresh button, and a
+**Recent access log** expander (who signed in/was denied/refreshed, and
+when — the same data written to `data/cache/admin_audit.log`, one JSON
+record per line, also git-ignored). Each refresh is throttled by a 5-minute
+cooldown, tracked in `data/cache/refresh_meta.json` — cross-session, so it
+holds even if a different admin clicks it from another browser.
 
 ---
 
