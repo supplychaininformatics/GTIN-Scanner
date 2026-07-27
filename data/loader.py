@@ -731,6 +731,34 @@ def load_contract_data() -> pd.DataFrame:
         if CACHE_PATH.exists():
             logger.warning("Falling back to stale local Parquet cache due to fetch failure.")
             return pd.read_parquet(CACHE_PATH)
-        
+
         # No local cache and fetch failed -> raise
         raise RuntimeError(f"Failed to fetch data from {source} and no local cache exists.") from e
+
+
+def invalidate_data_cache() -> None:
+    """Drop every layer of the data cache so the next load fetches fresh.
+
+    Three layers stand between a scan and the real data, and all three must be
+    cleared together or a "refresh" silently keeps serving old rows:
+
+      1. The on-disk Parquet file (CACHE_PATH) — load_contract_data() treats it
+         as fresh for 24h based purely on its mtime, so it's deleted rather than
+         just left for the age check to reject.
+      2. load_contract_data()'s own @st.cache_data memoization — cleared so the
+         function body actually runs again instead of returning its last result.
+      3. _load_from_lakehouse()'s @st.cache_data memoization — a second, inner
+         cache on the Fabric path specifically. Clearing only #2 would re-run
+         the router but still hit this cache and get the old lakehouse rows.
+
+    Callers on the mock path only need #1/#2 (the mock loader isn't cached),
+    but clearing all three unconditionally keeps this safe regardless of
+    DATA_SOURCE, including after a future switch from mock to fabric.
+
+    Note: this does NOT clear engine.get_lookup_engine()'s @st.cache_resource —
+    that is a 4th, separate cache the caller (core.admin.refresh_now) must also
+    clear, since data/ has no dependency on core/.
+    """
+    CACHE_PATH.unlink(missing_ok=True)
+    load_contract_data.clear()
+    _load_from_lakehouse.clear()
