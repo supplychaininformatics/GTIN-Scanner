@@ -1,12 +1,20 @@
 """
 app.py
 ~~~~~~
-GTIN Barcode Scanner — Streamlit entry point.
+GTIN Barcode Scanner — Handheld scan page, Streamlit entry point.
 
-Composition only. Page config, the header, and the two-column workspace.
+One of two surfaces (see PLAN.md): this is the picker-facing handheld —
+opens to a start form (Sanford ID + location), then the scan loop. Session
+lifecycle is owned entirely here: a session is minted on submit and can only
+be normal-ended from here (the monitor board, pages/board.py, is a passive
+viewer with a force-end escape hatch for a dropped device, not a normal-end
+control). Stacked mobile layout — the scan field, result, KPIs and history
+all run down one column, top to bottom, sized for a phone/handheld screen
+rather than a desktop monitor.
+
   * Lookup / API / caching  → engine/, api/, data/  (unchanged)
   * Scan orchestration      → core/lookup.py
-  * Session + history model → core/session.py
+  * Session + history model → core/session.py (backed by core/store.py)
   * Excel export            → core/export.py
   * Every pixel             → ui/theme.py, ui/components.py
 
@@ -24,8 +32,8 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 
-from core import autosave
-from core.export import EXPORT_FILENAME, EXPORT_MIME, build_workbook
+from core import store
+from core.export import EXPORT_MIME, build_workbook, export_filename
 from core.lookup import extract_gtin, get_lookup_engine, resolve_scan
 from core.session import (
     clear_result,
@@ -59,43 +67,46 @@ st.set_page_config(
 inject_theme()
 init_session()
 
-# ── Pre-scan gate: capture the warehouse location once per browser session ────
-# Mirrors the admin-email gate in pages/admin.py: a plain form, held in session
-# state, shown once. Free text — whoever is scanning identifies their own site,
-# there is no fixed list to maintain.
-if not st.session_state.warehouse_location:
-    # A resumed session (refresh, reconnect, server restart) carries its
-    # autosave id in the URL — session_state itself may have been wiped, but
-    # the URL survives all of those, so this is the only durable pointer back
-    # to the right file. See core/autosave.py.
+# ── Pre-scan gate: capture Sanford ID + location once per browser session ─────
+# A resumed session (refresh, reconnect, server restart) carries its session id
+# in the URL — session_state itself may have been wiped, but the URL survives
+# all of those, so this is the only durable pointer back to the right store row.
+if not st.session_state.session_id:
     resume_sid = st.query_params.get("sid")
     if resume_sid:
-        saved = autosave.load_session(resume_sid)
-        if saved:
+        saved = store.get_session(resume_sid)
+        if saved and saved["status"] == store.STATUS_ACTIVE:
             resume_session(resume_sid, saved)
             st.rerun()
         else:
-            # Stale or already-ended session — drop the dead param and fall
-            # through to a normal start gate instead of looping on it.
+            # Unknown, already-ended, or force-ended session — drop the dead
+            # param and fall through to a normal start gate instead of
+            # looping on it.
             del st.query_params["sid"]
 
     st.markdown(C.identity_header_html(), unsafe_allow_html=True)
     st.markdown(C.section_html("Start New Session +"), unsafe_allow_html=True)
-    st.write("Enter the current warehouse location for this scan session.")
-    with st.form("location_form"):
+    st.write("Scan your badge or type your Sanford ID, then enter the current warehouse location.")
+    with st.form("start_form"):
+        sanford_id_input = st.text_input(
+            "Sanford ID",
+            placeholder="Scan badge or type Sanford ID",
+        )
         location_input = st.text_input(
             "Warehouse Location",
             placeholder="e.g. Sioux Falls GS1",
-            label_visibility="collapsed",
         )
         start_submitted = st.form_submit_button("Start Session", type="primary")
 
     if start_submitted:
-        candidate = location_input.strip()
-        if candidate:
-            start_session(candidate)
+        sanford_id_candidate = sanford_id_input.strip()
+        location_candidate = location_input.strip()
+        if sanford_id_candidate and location_candidate:
+            start_session(sanford_id_candidate, location_candidate)
             st.query_params["sid"] = st.session_state.session_id
             st.rerun()
+        elif not sanford_id_candidate:
+            st.error("Enter or scan a Sanford ID to continue.")
         else:
             st.error("Enter a warehouse location to continue.")
     st.stop()
@@ -109,6 +120,7 @@ st.markdown(
         contract_lines=engine.size,
         cache_ttl="24h",
         location=st.session_state.warehouse_location,
+        sanford_id=st.session_state.sanford_id,
     ),
     unsafe_allow_html=True,
 )
@@ -120,9 +132,10 @@ def _confirm_end_session() -> None:
     export before clearing state. Cancel leaves the session untouched."""
     n = len(st.session_state.scan_history)
     st.write(
-        f"This will permanently clear this session's {n} scan{'s' if n != 1 else ''} "
+        f"This will end this session and clear its {n} scan{'s' if n != 1 else ''} "
         "from this device. Make sure you've downloaded the Excel export first — "
-        "this can't be undone."
+        "the session stays reachable from the monitor board for 3 days, but this "
+        "device's view of it can't be undone."
     )
     cancel_col, end_col = st.columns(2)
     with cancel_col:
@@ -136,26 +149,18 @@ def _confirm_end_session() -> None:
 
 
 with st.container(key="sf_endsession"):
-    # Two real buttons in equal columns — guaranteed-equal width, unlike a
-    # page_link + button pair, which are different widgets that size differently.
-    admin_col, end_col = st.columns(2)
-    with admin_col:
-        if st.button("Admin", key="sf_admin_btn", use_container_width=True):
-            st.switch_page("pages/admin.py")
-    with end_col:
-        if st.button("End Session", key="sf_end_session_btn", use_container_width=True):
-            _confirm_end_session()
+    if st.button("End Session", key="sf_end_session_btn", use_container_width=True):
+        _confirm_end_session()
 
 # The slot lives above the workspace but is filled after the scan resolves, so
 # the in-flight bar appears directly under the header where it belongs.
 progress_slot = st.empty()
 
-left, right = st.columns([38, 62], gap="large")
-
-# ── Left rail: the scan lane ──────────────────────────────────────────────────
-with left, st.container(key="sf_rail"):
-    # The card is a keyed container styled by CSS. A bare <div> in st.markdown
-    # cannot wrap sibling widgets — Streamlit closes it inside its own block.
+# ── Scan lane ──────────────────────────────────────────────────────────────────
+# Stacked mobile layout: scan field, result and history all run down one
+# column top to bottom (see PLAN.md — the handheld is a phone/handheld
+# screen, not a desktop monitor, so there is no side-by-side rail/stage split).
+with st.container(key="sf_rail"):
     with st.container(key="sf_lane"):
         st.markdown('<div class="sf-eyebrow">Scan Lane</div>', unsafe_allow_html=True)
 
@@ -212,8 +217,8 @@ elif submitted:
 last = st.session_state.last_result
 history = st.session_state.scan_history
 
-# ── Right panel: the result stage ─────────────────────────────────────────────
-with right, st.container(key="sf_stage"):
+# ── Result stage ───────────────────────────────────────────────────────────────
+with st.container(key="sf_stage"):
     if last:
         st.markdown(C.hero_card_html(last), unsafe_allow_html=True)
         st.markdown(
@@ -233,14 +238,24 @@ with right, st.container(key="sf_stage"):
             head, action = st.columns([3, 1], gap="small", vertical_alignment="center")
             with head:
                 st.markdown(
-                    C.section_html("Session History", f"{n} scan{'s' if n != 1 else ''}"),
+                    C.section_html("Session History", f"{n} item{'s' if n != 1 else ''}"),
                     unsafe_allow_html=True,
                 )
             with action:
                 st.download_button(
-                    label="Export Session to Excel",
-                    data=build_workbook(history, st.session_state.warehouse_location),
-                    file_name=EXPORT_FILENAME,
+                    label="Export to Excel",
+                    data=build_workbook(
+                        history,
+                        location=st.session_state.warehouse_location,
+                        sanford_id=st.session_state.sanford_id,
+                        session_id=st.session_state.session_id,
+                    ),
+                    file_name=export_filename(
+                        st.session_state.warehouse_location,
+                        st.session_state.sanford_id,
+                        st.session_state.session_id,
+                        store.get_session(st.session_state.session_id)["created_at"],
+                    ),
                     mime=EXPORT_MIME,
                     use_container_width=True,
                 )

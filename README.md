@@ -8,16 +8,18 @@ A production-ready Streamlit application that modernizes a legacy Excel macro fo
 
 ```
 gtin-scanner/
-├── app.py                    # Streamlit entry point — layout composition only
+├── app.py                    # Handheld scan page (start form + scan loop) — default page
 ├── pages/
-│   └── admin.py               # Admin-only manual data refresh (email-allowlist gated)
+│   ├── board.py               # Monitor master board: today's sessions, drill-in, export, force-end
+│   └── admin.py               # Admin-only data refresh + force-end (email-allowlist gated)
 ├── ui/
 │   ├── theme.py              # The single CSS injection + palette + JS runtime
 │   └── components.py         # header, kpi tiles, result card, pills, tables
 ├── core/
 │   ├── lookup.py             # Scan orchestration (GS1 parse → cache → API)
-│   ├── session.py            # Session state + scan history model
-│   ├── export.py             # Excel writer
+│   ├── store.py              # SQLite session/scan store (WAL mode) — session & scan persistence
+│   ├── session.py            # Session state + scan history model, backed by core/store.py
+│   ├── export.py             # Excel writer (per-session, dynamic filename)
 │   └── admin.py               # Admin auth check + cache-refresh orchestration
 ├── data/
 │   └── loader.py             # Fabric Lakehouse + Mock data (active by default)
@@ -36,9 +38,27 @@ gtin-scanner/
 
 `engine/`, `api/` and `data/` hold the lookup, API and caching logic and are
 independent of the UI. `core/` orchestrates them; `ui/` draws the result. No
-colour is hardcoded outside `ui/theme.py`. `pages/admin.py` is a second,
-Streamlit-multipage entry point — the scan page (`app.py`) stays the default
-page and is otherwise unchanged.
+colour is hardcoded outside `ui/theme.py`.
+
+Two picker/supervisor-facing surfaces, both backed by the same SQLite store
+(`core/store.py`, WAL mode — see `PLAN.md` for the full design):
+
+- **`app.py`** (default page) — the handheld: a picker scans their Sanford ID
+  (badge or typed) and enters a location to start a session, then scans
+  GTINs in a loop. Only the handheld that started a session can normal-end
+  it.
+- **`pages/board.py`** — the monitor: a passive, wide-layout board listing
+  today's sessions (Sanford ID, location, status, scan count, last scan),
+  with drill-in to any session's full scan list, a per-session Excel export,
+  a filter for the full 3-day retention window, and a Force End control for
+  a dropped/dead handheld's session.
+- **`pages/admin.py`** — data refresh (unchanged) plus the same Force End
+  control, for supervisors who reach session management through the admin
+  gate instead of the board.
+
+Sessions and scans older than 3 days are purged automatically — export
+before then, since the 3-day window is the only backup (no offline queue,
+no archival beyond it in v1; see `PLAN.md` → "Retention").
 
 **Data flow per scan:**
 

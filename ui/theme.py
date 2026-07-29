@@ -44,6 +44,17 @@ STATUS: dict[str, dict[str, str]] = {
     "hold":     {"label": "On Hold",   "icon": "⚠", "cls": "is-hold"},
 }
 
+# Session lifecycle status (core/store.py) — a distinct concept from the
+# per-scan STATUS above (a session can be "active" while its scans are a mix
+# of cache/api/notfound), so it gets its own colour mapping rather than
+# reusing STATUS's keys. "stale" is a derived label (see
+# core.store.session_is_stale), never a value actually stored in the DB.
+SESSION_STATUS: dict[str, dict[str, str]] = {
+    "active":  {"label": "Active",  "icon": "●", "cls": "is-cache"},
+    "stale":   {"label": "Stale",   "icon": "⚠", "cls": "is-hold"},
+    "ended":   {"label": "Ended",   "icon": "✓", "cls": "is-api"},
+}
+
 HEADER_HEIGHT_PX = 72
 
 
@@ -171,6 +182,54 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     font-family: var(--sf-mono); font-variant-numeric: tabular-nums;
 }
 
+/* ── Cross-page nav (Monitor Board ⇄ Admin only — see PLAN.md: the handheld
+   is a picker-only surface and deliberately carries no link to either) ────
+   A real st.page_link, not markup, so it drives Streamlit's own router.
+   Pinned into the fixed header's right side using the same trick as
+   .st-key-sf_endsession below: Streamlit wraps the keyed container in a
+   layout wrapper that carries the surface background, so that wrapper (not
+   just the keyed node) has to be pinned and stripped too. */
+[data-testid="stLayoutWrapper"]:has(.st-key-sf_navlink),
+[data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-sf_navlink),
+.st-key-sf_navlink {
+    position: fixed !important;
+    top: 14px;
+    right: 2rem;
+    left: auto !important;
+    width: 170px !important;
+    max-width: none !important;
+    z-index: 999995;
+    background: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+.st-key-sf_navlink [data-testid="stVerticalBlock"],
+.st-key-sf_navlink [data-testid="stElementContainer"] {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+}
+.st-key-sf_navlink [data-testid="stPageLink"] {
+    border: 1px solid rgb(255 255 255 / .35);
+    border-radius: 8px;
+    padding: .3rem .8rem;
+    background: rgb(255 255 255 / .08);
+    transition: background 160ms ease-out, border-color 160ms ease-out;
+}
+.st-key-sf_navlink [data-testid="stPageLink"]:hover {
+    background: rgb(255 255 255 / .18);
+    border-color: rgb(255 255 255 / .6);
+}
+.st-key-sf_navlink [data-testid="stPageLink"] p {
+    color: var(--sf-surface) !important;
+    font-size: .8125rem; font-weight: 600; letter-spacing: .02em;
+    white-space: nowrap;
+}
+
 /* ── API in-flight bar (cache hits never render this) ───────────────────── */
 .sf-progress {
     position: relative; height: 3px; width: 100%;
@@ -187,8 +246,11 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     100% { transform: translateX(360%); }
 }
 
-/* ── Left rail: the scan lane ───────────────────────────────────────────── */
-.st-key-sf_rail { position: sticky; top: calc(var(--sf-header-h) + 1rem); }
+/* ── Scan lane (handheld, app.py) ───────────────────────────────────────────
+   Stacked mobile layout: the lane sits at the top of one running column,
+   not a sticky sidebar next to a separate stage — there is no sibling panel
+   to stay aligned with on a phone-width screen. */
+.st-key-sf_rail { max-width: 640px; margin: 0 auto; }
 
 /* The card is a keyed container, not a bare <div> in st.markdown — Streamlit
    closes a stray div inside its own block, so it can never wrap the widgets. */
@@ -280,16 +342,18 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     box-shadow: 0 0 0 4px var(--sf-focus-ring) !important;
 }
 
-/* Admin link and End Session button — pinned to the bottom-RIGHT corner of the
-   viewport (not the document flow, so scrolling the history table never moves
-   them), side by side.
+/* End Session button (handheld only, app.py) — pinned to the bottom-RIGHT
+   corner of the viewport (not the document flow, so scrolling the history
+   table never moves it). A single button now that the handheld carries no
+   Admin link of its own (see PLAN.md — Admin/force-end is a supervisor
+   surface, reached from the monitor board, not from a picker's device).
 
    Streamlit wraps the keyed container in a full-width layout wrapper that
-   carries the surface background — that wrapper is the white box. Pin it to the
-   corner and strip every surface/box/padding from it AND the keyed block, so
-   only the two blue buttons show. The wrapper is targeted three ways
-   (:has on the parent, the parent-of-parent, and the keyed node itself) so the
-   fix holds regardless of exactly which node Streamlit puts the class on. */
+   carries the surface background — that wrapper is the white box. Pin it to
+   the corner and strip every surface/box/padding from it AND the keyed
+   block, so only the blue button shows. The wrapper is targeted three ways
+   (:has on the parent, the parent-of-parent, and the keyed node itself) so
+   the fix holds regardless of exactly which node Streamlit puts the class on. */
 [data-testid="stLayoutWrapper"]:has(.st-key-sf_endsession),
 [data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-sf_endsession),
 .st-key-sf_endsession {
@@ -297,7 +361,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     bottom: 1.25rem;
     right: 1.5rem;
     left: auto !important;
-    width: 300px !important;
+    width: 160px !important;
     max-width: none !important;
     z-index: 999980;
     background: transparent !important;
@@ -307,17 +371,6 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     padding: 0 !important;
     margin: 0 !important;
 }
-/* Two equal st.columns hold the buttons — keep them side by side (never
-   Streamlit's narrow-viewport stacking) and strip every nested surface. */
-.st-key-sf_endsession [data-testid="stHorizontalBlock"] {
-    flex-wrap: nowrap !important;
-    gap: .5rem !important;
-}
-.st-key-sf_endsession [data-testid="stColumn"] {
-    width: calc(50% - .25rem) !important;
-    flex: 1 1 0 !important;
-    min-width: 0 !important;
-}
 .st-key-sf_endsession [data-testid="stVerticalBlock"],
 .st-key-sf_endsession [data-testid="stElementContainer"] {
     background: transparent !important;
@@ -325,8 +378,6 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     border: none !important;
     padding: 0 !important;
 }
-/* Both are real st.buttons now — identical styling, each fills its column, so
-   the two columns being equal makes the two buttons equal. */
 .st-key-sf_endsession [data-testid="stButton"] button {
     width: 100% !important;
     min-width: 0 !important;
@@ -530,52 +581,16 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
    rest of the stage (history, etc.) off screen. */
 .sf-table-scroll:not(.is-history) { max-height: 40vh; }
 
-/* ── The right panel owns the viewport ──────────────────────────────────────
-   The stage is exactly one screen tall, the hero sits at the top, and Session
-   History absorbs whatever height is left over and scrolls inside itself. That
-   is what keeps the scan lane and the hero both visible at 1366x768 while
-   still leaving no dead canvas at 1080p.
-
-   !important is load-bearing: Streamlit's emotion classes set their own height
-   and outrank a plain rule. Every keyed container is also wrapped in a
-   stLayoutWrapper, so it is the *wrapper* — not our container — that ends up
-   being the flex child of the stage.
-
-   And Streamlit makes the stage itself a flex item with `flex-basis: 0%`, which
-   makes the browser ignore `height` on the main axis entirely — hence
-   `flex: 0 0 auto`, without which the calc below silently does nothing. */
-.st-key-sf_stage {
-    display: flex !important;
-    flex-direction: column !important;
-    flex: 0 0 auto !important;
-    height: calc(100vh - var(--sf-header-h) - 2rem) !important;
-    min-height: 0 !important;
-}
-.st-key-sf_stage > [data-testid="stLayoutWrapper"]:last-child {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-}
-.st-key-sf_hist,
-.st-key-sf_hist [data-testid="stElementContainer"],
-.st-key-sf_hist [data-testid="stMarkdown"],
-.st-key-sf_hist [data-testid="stMarkdown"] > div,
-.st-key-sf_hist [data-testid="stMarkdownContainer"] {
-    display: flex !important;
-    flex-direction: column !important;
-    flex: 1 1 auto !important;
-    min-height: 0 !important;   /* without this a flex child refuses to shrink */
-    margin: 0 !important;
-    padding: 0 !important;
-    width: 100%;
-}
+/* ── Result stage (handheld, app.py) ─────────────────────────────────────────
+   Stacked mobile layout: the hero, full record and Session History all run
+   down the page in natural document flow below the scan lane, and the page
+   itself scrolls — there is no separate desktop-style panel to lock to the
+   viewport height, so History gets a generous but bounded max-height of its
+   own scroll region instead of absorbing "whatever's left" of a fixed stage. */
+.st-key-sf_stage { max-width: 640px; margin: 0 auto; }
 
 .sf-table-scroll.is-history {
-    flex: 1 1 auto;
-    min-height: 0;
-    max-height: none;
-    height: auto;
+    max-height: 50vh;
 }
 .sf-table {
     width: 100%;
