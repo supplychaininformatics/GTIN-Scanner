@@ -30,6 +30,7 @@ import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
+from core import store
 from core.admin import (
     cooldown_remaining,
     is_admin,
@@ -63,6 +64,8 @@ inject_theme()
 # page's own context ("Data Refresh") is conveyed by the section heading
 # below, not by overriding the shared header.
 st.markdown(C.identity_header_html(), unsafe_allow_html=True)
+with st.container(key="sf_navlink"):
+    st.page_link("pages/board.py", label="← Monitor Board", icon=None)
 
 if "admin_email" not in st.session_state:
     st.session_state.admin_email = None
@@ -89,9 +92,9 @@ if not st.session_state.admin_email:
         else:
             log_audit_event("access_denied", candidate)
             st.error(
-                "That email isn't on the admin allowlist. Ask IT to add you to "
-                "`allowed_emails` (or your group's domain to `allowed_domains`) "
-                "in `.streamlit/secrets.toml`."
+                "That email isn't on the admin allowlist. Ask Supply Chain "
+                "Informatics to add you to allowed emails (or your group's "
+                "domain to allowed emails)."
             )
 
 # ── Verified this session ───────────────────────────────────────────────────
@@ -135,6 +138,47 @@ else:
         mins, secs = divmod(remaining, 60)
         st.caption(f"Available again in {mins}m {secs}s — recently refreshed.")
 
+    st.divider()
+    st.markdown(C.section_html("Session Management"), unsafe_allow_html=True)
+    st.write(
+        "Force End is the escape hatch for a dropped or dead handheld — a "
+        "picker's own device should normally end its own session instead. "
+        "Every use is logged below. The monitor board has the same control "
+        "for day-to-day use; this is the same action from the admin side."
+    )
+    live_sessions = [
+        s for s in store.list_sessions(since_days=None) if s["status"] == store.STATUS_ACTIVE
+    ]
+    if not live_sessions:
+        st.caption("No active sessions.")
+    else:
+        for s in live_sessions:
+            stale = store.session_is_stale(s, s.get("last_scanned"))
+            row_col, btn_col = st.columns([4, 1], gap="small", vertical_alignment="center")
+            with row_col:
+                tag = " · STALE" if stale else ""
+                st.markdown(
+                    f'{C.session_status_pill_html("stale" if stale else "active")} '
+                    f'**{s.get("sanford_id") or "—"}** — {s.get("location") or "—"} '
+                    f'· {s.get("scan_count", 0)} scans{tag}',
+                    unsafe_allow_html=True,
+                )
+            with btn_col:
+                clicked = st.button(
+                    "Force End",
+                    key=f"admin_force_end_{s['session_id']}",
+                    use_container_width=True,
+                )
+                if clicked and store.force_end_session(s["session_id"]):
+                    log_audit_event(
+                        "force_end_session",
+                        email,
+                        session_id=s["session_id"],
+                        sanford_id=s.get("sanford_id"),
+                    )
+                    st.toast("Session force-ended.", icon="✅")
+                    st.rerun()
+
     with st.expander("Recent access log"):
         entries = read_audit_log(limit=20)
         if not entries:
@@ -144,6 +188,7 @@ else:
                 "access_granted": "Signed in",
                 "access_denied": "Denied",
                 "refresh": "Refreshed",
+                "force_end_session": "Force-ended session",
             }
             rows = [
                 {
