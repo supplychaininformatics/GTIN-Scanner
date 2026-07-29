@@ -19,7 +19,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from .theme import STATUS
+from .theme import SESSION_STATUS, STATUS
 
 APP_TITLE = "Warehouse GTIN Scanner"
 
@@ -104,7 +104,11 @@ def identity_header_html() -> str:
 
 
 def header_html(
-    data_source: str, contract_lines: int, cache_ttl: str, location: str | None = None
+    data_source: str,
+    contract_lines: int,
+    cache_ttl: str,
+    location: str | None = None,
+    sanford_id: str | None = None,
 ) -> str:
     """The fixed top bar: identity block plus live session chips."""
     chips = [
@@ -112,6 +116,8 @@ def header_html(
         ("Contract lines", f"{contract_lines:,}"),
         ("Cache TTL", html.escape(cache_ttl)),
     ]
+    if sanford_id:
+        chips.append(("Sanford ID", html.escape(sanford_id)))
     if location:
         chips.append(("Warehouse Location", html.escape(location)))
     chip_html = "".join(
@@ -137,6 +143,18 @@ def header_html(
 def status_pill_html(status_key: str) -> str:
     """The one status pill used by the hero card and every history row."""
     meta = STATUS.get(status_key)
+    if meta is None:
+        return ""
+    return (
+        f'<span class="sf-pill {meta["cls"]}">'
+        f'<span class="sf-pill-glyph">{meta["icon"]}</span>{meta["label"]}</span>'
+    )
+
+
+def session_status_pill_html(status_key: str) -> str:
+    """Session lifecycle pill (active/stale/ended) — the monitor board's
+    equivalent of status_pill_html, using SESSION_STATUS instead of STATUS."""
+    meta = SESSION_STATUS.get(status_key)
     if meta is None:
         return ""
     return (
@@ -330,6 +348,79 @@ def history_table_html(history: list[dict]) -> str:
   </table>
 </div>
 """
+
+
+def session_row_status_key(session: dict) -> str:
+    """The SESSION_STATUS key a session row should render as: 'active',
+    'stale', or 'ended'. Stale is derived (core.store.session_is_stale) —
+    the row's own `status` column is either 'active' or 'ended' in the DB."""
+    if session["status"] == "ended":
+        return "ended"
+    return "stale" if session.get("is_stale") else "active"
+
+
+def session_list_table_html(sessions: list[dict]) -> str:
+    """The monitor board's session list: Sanford ID, location, status, scan
+    count, last-scan time. Newest first (caller sorts; this only renders).
+
+    Deliberately presentational only — clicking a row to drill in is a
+    Streamlit interaction (a button, not a link), so pages/board.py pairs
+    this table with its own native per-row "View" controls rather than this
+    module reaching for click handling it isn't built to own (see the
+    module docstring: every function here is pure).
+    """
+    rows = []
+    for s in sessions:
+        key = session_row_status_key(s)
+        last_scanned = s.get("last_scanned")
+        last_cell = (
+            f'<td class="sf-mono sf-nowrap">{_val(_wall_clock(last_scanned))}</td>'
+            if last_scanned
+            else f'<td class="sf-mono sf-dim">{_EM_DASH}</td>'
+        )
+        rows.append(
+            "<tr>"
+            f'<td class="sf-wrap">{_val(s.get("sanford_id"))}</td>'
+            f'<td class="sf-wrap">{_val(s.get("location"))}</td>'
+            f"<td>{session_status_pill_html(key)}</td>"
+            f'<td class="sf-mono sf-nowrap">{_val(s.get("scan_count", 0))}</td>'
+            f"{last_cell}"
+            "</tr>"
+        )
+
+    return f"""
+<div class="sf-table-scroll is-history">
+  <table class="sf-table">
+    <colgroup>
+      <col class="sf-c-item"><col class="sf-c-item">
+      <col class="sf-c-status"><col class="sf-c-time"><col class="sf-c-time">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Sanford ID</th><th>Location</th><th>Status</th>
+        <th>Scans</th><th>Last Scan</th>
+      </tr>
+    </thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table>
+</div>
+"""
+
+
+def _wall_clock(iso_ts: str | None) -> str:
+    """Format a stored UTC ISO datetime for display. Mirrors
+    core.session._wall_clock — duplicated here rather than imported so
+    ui/components.py stays free of a core/ dependency (see ui/theme.py's
+    "no other module may hardcode..." boundary: presentation doesn't reach
+    into orchestration)."""
+    if not iso_ts:
+        return ""
+    try:
+        from datetime import datetime  # noqa: PLC0415
+
+        return datetime.fromisoformat(iso_ts).strftime("%b %d, %H:%M:%S")
+    except (TypeError, ValueError):
+        return iso_ts
 
 
 def section_html(title: str, count: str | None = None) -> str:

@@ -3,38 +3,88 @@ core/export.py
 ~~~~~~~~~~~~~~
 Excel session export.
 
-Relocated verbatim from app.py. The produced workbook is byte-for-byte the same
-as before the UI rebuild: same sheet name, same column set and order, same
-filename. Only the call site moved.
+One workbook per session, triggered from the monitor board (see
+pages/board.py) — there is no "export all sessions" in v1. The column set
+gained `session_id`, `sanford_id`, `location` (each session-level, one value
+for the whole file, inserted as lead columns exactly as `location` already
+was) and `Scan Count` (genuinely per-row, since PLAN.md's duplicate-handling
+policy increments it instead of dropping or appending a rescan).
+
+The filename is now dynamic — `EXPORT_FILENAME` was a single static constant,
+which would collide across the many per-session files the board can now
+produce back to back.
 """
 
 from __future__ import annotations
 
 import io
+import re
 
 import pandas as pd
 
-EXPORT_FILENAME = "gtin_scan_history.xlsx"
 EXPORT_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-# Column order as originally written. Keys added for the UI (status_key,
-# on_hold) are deliberately absent, so the exported sheet is unchanged.
+# Column order as originally written, plus Scan Count (see PLAN.md "Duplicate
+# handling"). Keys added for the UI only (status_key, on_hold) are
+# deliberately absent, so the exported sheet stays clean.
 _COLUMNS = [
     "time", "source", "status", "Scan", "Item", "Company", "Brand",
     "Description", "GTIN", "GTIN UOM", "UOU", "HIBCC", "LAWSON ID", "Lawson UOM",
+    "Scan Count",
 ]
 
+_FILENAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
-def build_workbook(history: list[dict], location: str | None = None) -> bytes:
-    """Serialise the session scan history to an .xlsx byte string.
 
-    `location` is session-level, not per-scan — the same value for every row —
-    so it isn't in `_COLUMNS`. It's inserted as the lead column when set.
+def _filename_part(value: str | None, fallback: str) -> str:
+    """Sanitise a value for use inside the export filename.
+
+    Location and Sanford ID are free text (see PLAN.md "Sanford ID entry") —
+    neither is validated against a format, so both need to be scrubbed to
+    filesystem/URL-safe characters before landing in a Content-Disposition
+    filename.
+    """
+    cleaned = _FILENAME_UNSAFE_RE.sub("_", (value or "").strip()).strip("_")
+    return cleaned or fallback
+
+
+def export_filename(
+    location: str | None, sanford_id: str | None, session_id: str, created_at: str
+) -> str:
+    """Build a collision-resistant filename for one session's export.
+
+    `created_at` is the session's full ISO datetime (see core/store.py) —
+    only the date part is used, matching the existing wall-clock display
+    convention (UTC in the DB, formatted for the UI/export).
+    """
+    date_part = (created_at or "")[:10] or "unknown-date"
+    sid8 = (session_id or "")[:8] or "unknown"
+    loc = _filename_part(location, "site")
+    sid = _filename_part(sanford_id, "picker")
+    return f"scans_{loc}_{sid}_{date_part}_{sid8}.xlsx"
+
+
+def build_workbook(
+    history: list[dict],
+    location: str | None = None,
+    sanford_id: str | None = None,
+    session_id: str | None = None,
+) -> bytes:
+    """Serialise a session's scan history to an .xlsx byte string.
+
+    `location`, `sanford_id` and `session_id` are session-level, not
+    per-scan — the same value for every row — so none of them are in
+    `_COLUMNS`. Each is inserted as a lead column when set, in the order
+    session_id, sanford_id, location, matching PLAN.md's column list.
     """
     df_export = pd.DataFrame(history)
     df_export = df_export[[c for c in _COLUMNS if c in df_export.columns]]
     if location:
         df_export.insert(0, "Warehouse Location", location)
+    if sanford_id:
+        df_export.insert(0, "Sanford ID", sanford_id)
+    if session_id:
+        df_export.insert(0, "Session ID", session_id)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
