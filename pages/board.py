@@ -49,16 +49,15 @@ with st.container(key="sf_navlink"):
     st.page_link("pages/admin.py", label="Admin →", icon=None)
 
 # ── Device onboarding: static link, not per-session ─────────────────────────
-# See PLAN.md "Device onboarding": scan with the phone's own camera app (not
-# in-app) → opens this URL in the browser → Add to Home Screen. The link never
+# See PLAN.md "Device onboarding": open this URL directly on the handheld's
+# browser → Add to Home Screen. The link never
 # carries a session id, so provisioning a new handheld is a one-time action,
 # not a per-shift one.
 deploy_url = os.getenv("DEPLOY_URL", "").strip()
 with st.expander("Add a new handheld", expanded=False):
     if deploy_url:
         st.write(
-            "On the handheld's own camera app (not inside this app), scan a QR "
-            "code for this link, or open it directly, then **Add to Home "
+            "On the handheld open this link directly, then **Add to Home "
             "Screen**. This only needs to be done once per device."
         )
         st.code(deploy_url, language=None)
