@@ -44,7 +44,7 @@ st.set_page_config(
 inject_theme()
 store.purge_old_sessions()
 
-st.markdown(C.identity_header_html(), unsafe_allow_html=True)
+st.markdown(C.identity_header_html(page_name="Monitor Board"), unsafe_allow_html=True)
 with st.container(key="sf_navlink"):
     st.page_link("pages/admin.py", label="Admin →", icon=None)
 
@@ -61,11 +61,21 @@ with st.expander("Add a new handheld", expanded=False):
             "Screen**. This only needs to be done once per device."
         )
         st.code(deploy_url, language=None)
+        st.caption(
+            "The first load on a newly added handheld can take 3–5 minutes "
+            "to start. This is normal; scanning once it's up will be fast "
+            "from then on."
+        )
     else:
         st.info(
             "No deploy URL is configured yet. Set `DEPLOY_URL` in `.env` once "
             "this app has a real address, and it will show here for handheld "
             "onboarding."
+        )
+        st.caption(
+            "Heads up: if the app has been idle, it goes to sleep — the "
+            "first load on a newly added handheld can take 3–5 minutes to "
+            "wake back up. This is normal."
         )
 
 st.markdown(C.section_html("Sessions"), unsafe_allow_html=True)

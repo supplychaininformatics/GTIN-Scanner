@@ -84,13 +84,13 @@ if not st.session_state.session_id:
             # looping on it.
             del st.query_params["sid"]
 
-    st.markdown(C.identity_header_html(), unsafe_allow_html=True)
+    st.markdown(C.identity_header_html(page_name="Handheld"), unsafe_allow_html=True)
     st.markdown(C.section_html("Start New Session +"), unsafe_allow_html=True)
-    st.write("Scan your badge or type your Sanford ID, then enter the current warehouse location.")
+    st.write("Scan your badge or type your Sanford Id/ Name, then enter the current warehouse location.")
     with st.form("start_form"):
         sanford_id_input = st.text_input(
-            "Sanford ID",
-            placeholder="Scan badge or type Sanford ID",
+            "Sanford Id/ Name",
+            placeholder="Scan badge or type Sanford Id/ Name",
         )
         location_input = st.text_input(
             "Warehouse Location",
@@ -106,7 +106,7 @@ if not st.session_state.session_id:
             st.query_params["sid"] = st.session_state.session_id
             st.rerun()
         elif not sanford_id_candidate:
-            st.error("Enter or scan a Sanford ID to continue.")
+            st.error("Enter or scan a Sanford Id/ Name to continue.")
         else:
             st.error("Enter a warehouse location to continue.")
     st.stop()
@@ -121,6 +121,7 @@ st.markdown(
         cache_ttl="24h",
         location=st.session_state.warehouse_location,
         sanford_id=st.session_state.sanford_id,
+        page_name="Handheld",
     ),
     unsafe_allow_html=True,
 )
