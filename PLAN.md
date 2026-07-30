@@ -14,18 +14,18 @@ hatch below). No in-app camera anywhere.
 | Surface | Role |
 |---|---|
 | **Handheld scan app** (stacked mobile layout) | Opens to a **start form**: Sanford ID (scan badge or type) + location (free text). Submitting creates the session. Then the scan loop: big scan field, lean list of the picker's own scans (status + Item Description + Lawson UOM + Scan Count). Ends its own session behind a confirm dialog. |
-| **Monitor master board** (wide layout, evolution of current `app.py`) | Shows the static app QR/link (provisioning/fallback, not per-session). Lists **today's sessions** — Sanford ID, location, status, scan count, last-scan time. Click a session → full scan list. **Per-session Excel export.** Small filter to view the full 3-day retention window. Force-end control for dead sessions. |
+| **Monitor master board** (wide layout, evolution of current `app.py`) | Shows the static app link (provisioning/fallback, not per-session). Lists **today's sessions** — Sanford ID, location, status, scan count, last-scan time. Click a session → full scan list. **Per-session Excel export.** Small filter to view the full 3-day retention window. Force-end control for dead sessions. |
 | **Admin** (`pages/admin.py`) | Unchanged — Fabric refresh, audit log. Natural home for the force-end control. |
 
 ## Device onboarding (once per handheld, not per session)
 
-Scan the monitor/printed QR with the device's **system camera app** (not
-in-app) → opens the app URL in the browser → **Add to Home Screen**.
-Thereafter pickers just tap the icon. The QR is a static link — it never
-carries a session id, so it doesn't need to be re-scanned each session.
+Open the app URL directly on the handheld's browser → **Add to Home
+Screen**. Thereafter pickers just tap the icon. The link is static — it
+never carries a session id, so it doesn't need to be re-entered each
+session.
 
 Rejected: in-app live QR scanning. Handheld-minted sessions removed the need
-for the QR to carry data, and Streamlit's iframe-based custom components
+for a QR to carry data, and Streamlit's iframe-based custom components
 can't reliably get `getUserMedia`/camera permission — building it would have
 spent the riskiest engineering in the whole plan solving a problem that no
 longer exists.
