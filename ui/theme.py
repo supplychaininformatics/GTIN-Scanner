@@ -196,6 +196,11 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     font-size: .875rem; color: rgb(255 255 255 / .95); font-weight: 600;
     font-family: var(--sf-mono); font-variant-numeric: tabular-nums;
 }
+/* Handheld-only KPI chips (see ui.components._kpi_chip_html) folded into the
+   header's chip row in place of the old standalone KPI strip. Not-Found /
+   On-Hold light up the moment they're non-zero, same as the KPI tiles did. */
+.sf-chip.is-alert-red .sf-chip-v { color: var(--sf-red); }
+.sf-chip.is-alert-amber .sf-chip-v { color: var(--sf-amber); }
 
 /* ── Cross-page nav (Monitor Board ⇄ Admin only — see PLAN.md: the handheld
    is a picker-only surface and deliberately carries no link to either) ────
@@ -446,43 +451,6 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     color: var(--sf-muted) !important;
 }
 
-/* ── KPI strip — three across, then the two alert tiles on a wider row ──────
-   A 6-column grid: the normal tiles span 2, the alert tiles span 3, so five
-   tiles still fill both rows edge to edge with no orphan cell. */
-.sf-kpi {
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    gap: .55rem;
-}
-.sf-kpi-tile {
-    grid-column: span 2;
-    background: var(--sf-surface);
-    border: 1px solid var(--sf-hairline);
-    border-radius: 10px;
-    padding: .65rem .7rem;
-    display: flex; flex-direction: column; gap: 1px;
-    transition: border-color 200ms ease-out, background 200ms ease-out;
-}
-.sf-kpi-tile.is-wide { grid-column: span 3; }
-.sf-kpi-num {
-    font-family: var(--sf-mono); font-variant-numeric: tabular-nums;
-    font-size: 1.6rem; font-weight: 700; line-height: 1.15;
-    color: var(--sf-blue);
-}
-/* "Data Warehouse Hits" is long — let it wrap rather than overflow its tile.
-   Grid stretches the row, so a two-line label keeps the tiles the same height. */
-.sf-kpi-lab {
-    font-size: .625rem; text-transform: uppercase; letter-spacing: .06em;
-    font-weight: 700; color: var(--sf-muted);
-    line-height: 1.25;
-}
-.sf-kpi-tile.is-amber { border-color: var(--sf-amber); background: var(--sf-amber-tint); }
-.sf-kpi-tile.is-amber .sf-kpi-num { color: var(--sf-ink); }
-.sf-kpi-tile.is-amber .sf-kpi-lab { color: var(--sf-ink); }
-.sf-kpi-tile.is-red { border-color: var(--sf-red); background: var(--sf-red-tint); }
-.sf-kpi-tile.is-red .sf-kpi-num { color: var(--sf-red); }
-.sf-kpi-tile.is-red .sf-kpi-lab { color: var(--sf-red); }
-
 /* ── Status pill — one look, everywhere ─────────────────────────────────── */
 .sf-pill {
     display: inline-flex; align-items: center; gap: .35rem;
@@ -521,6 +489,21 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: none; }
 }
+
+/* Merged hero + full-record card (handheld only — see
+   C.scan_result_card_html). One card, one border/shadow, instead of the
+   hero bar and the full-record table stacked as two separate cards. */
+.sf-hero-merged { padding-bottom: 0; }
+/* Outranks the generic .sf-table-scroll:not(.is-history) max-height rule
+   (declared later in the sheet, so source order alone would let it win) by
+   pairing the class with itself for higher specificity. */
+.sf-hero-record.sf-hero-record {
+    margin: .9rem -1.5rem -1.25rem;
+    border: none; border-top: 1px solid var(--sf-hairline);
+    border-radius: 0 0 12px 12px;
+    max-height: 32vh;
+}
+.sf-hero-record .sf-kv th { background: var(--sf-canvas); }
 
 .sf-hero-dup {
     display: inline-flex; align-items: center; gap: .4rem;
@@ -607,6 +590,14 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 .sf-table-scroll.is-history {
     max-height: 50vh;
 }
+
+/* Handheld history is denser than the monitor board's: smaller font, tighter
+   row padding, so more scans fit on a phone screen without scrolling as much.
+   Scoped to the handheld's own keyed container so the monitor board's
+   history table (pages/board.py — no .st-key-sf_hist wrapper) is untouched. */
+.st-key-sf_hist .sf-table { font-size: .8125rem; }
+.st-key-sf_hist .sf-table td,
+.st-key-sf_hist .sf-table th { padding: .35rem .55rem; }
 .sf-table {
     width: 100%;
     table-layout: fixed;      /* fixed cols + a fluid Description column */
@@ -759,7 +750,6 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 /* ── 1366x768: keep the scan lane and hero on-screen together ───────────── */
 @media (max-height: 800px) {
     .sf-hero { padding: 1rem 1.25rem; }
-    .sf-kpi-num { font-size: 1.4rem; }
     .sf-table-scroll:not(.is-history) { max-height: 34vh; }
     .block-container { padding-bottom: .75rem !important; }
 }
@@ -935,7 +925,7 @@ _JS = r"""
   function countUp() {
     var reduce = false;
     try { reduce = P.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
-    var nodes = D.querySelectorAll('.sf-kpi-num[data-sf-key]');
+    var nodes = D.querySelectorAll('[data-sf-key][data-sf-val]');
     Array.prototype.forEach.call(nodes, function (node) {
       var key = node.getAttribute('data-sf-key');
       var to = parseInt(node.getAttribute('data-sf-val') || '0', 10);
