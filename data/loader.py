@@ -31,6 +31,19 @@ logger = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).parent / "cache" / "contract_lines.parquet"
 
+# Candidate locations for the full mock dataset, tried in order by
+# _resolve_mock_dataset(). The repo-relative paths come first so a deployed
+# container (Streamlit Cloud, a container image — anywhere without the
+# developer's home directory) can find a committed dataset; ~/Downloads stays
+# last so existing local setups keep working with no change. Set
+# MOCK_DATA_PATH in .env to point somewhere else entirely.
+_MOCK_DATA_DIR = Path(__file__).parent / "mock"
+_MOCK_DATASET_CANDIDATES = (
+    _MOCK_DATA_DIR / "contract_line.parquet",
+    _MOCK_DATA_DIR / "contract_line.xlsx",
+    Path.home() / "Downloads" / "contract_line.xlsx",
+)
+
 DEFAULT_ODBC_DRIVER = "ODBC Driver 18 for SQL Server"
 DEFAULT_CONTRACT_LINE_TABLE = "[Silver_Lake].[infor].[contract_line]"
 
@@ -666,26 +679,57 @@ def _fetch_fresh_data(source: str) -> pd.DataFrame:
     else:
         raise ValueError(f"Unknown DATA_SOURCE={source!r}. Expected 'mock' or 'fabric'.")
 
-def _load_mock_from_excel() -> pd.DataFrame:
-    """Load the full 130K row mock dataset from the user's local Excel file.
-    Falls back to the 20-row sample if the Excel file is missing.
+def _resolve_mock_dataset() -> Path | None:
+    """First existing mock dataset among the configured locations, or None.
+
+    MOCK_DATA_PATH wins outright if set — a missing file there is a
+    misconfiguration worth a loud warning, not something to silently paper
+    over with a different candidate.
     """
-    excel_path = Path.home() / "Downloads" / "contract_line.xlsx"
-    if not excel_path.exists():
-        logger.warning("Excel file %s not found. Falling back to 20-row mock data.", excel_path)
+    override = os.getenv("MOCK_DATA_PATH", "").strip()
+    if override:
+        override_path = Path(override).expanduser()
+        if override_path.exists():
+            return override_path
+        logger.warning("MOCK_DATA_PATH=%s does not exist. Ignoring it.", override_path)
+
+    return next((path for path in _MOCK_DATASET_CANDIDATES if path.exists()), None)
+
+
+def _load_mock_from_excel() -> pd.DataFrame:
+    """Load the full 130K row mock dataset from the first location that has it.
+
+    Reads Parquet or Excel (dispatched on suffix) so the dataset can be
+    committed as Parquet — far smaller and faster to load than the .xlsx, and
+    the only practical way to ship it to a deployed container. Falls back to
+    the 20-row sample when no dataset is present anywhere.
+    """
+    dataset_path = _resolve_mock_dataset()
+    if dataset_path is None:
+        logger.warning(
+            "No mock dataset found in any of %s. Falling back to 20-row mock data.",
+            [str(p) for p in _MOCK_DATASET_CANDIDATES],
+        )
         return _load_mock_data_fallback()
 
-    logger.info("Loading full mock data from %s (this takes a moment...)", excel_path)
-    df = pd.read_excel(excel_path, sheet_name='Sheet1', dtype=str)
-    df = df.drop(columns=['key'], errors='ignore')
+    logger.info("Loading full mock data from %s (this takes a moment...)", dataset_path)
+    if dataset_path.suffix.lower() == ".parquet":
+        df = pd.read_parquet(dataset_path)
+    else:
+        df = pd.read_excel(dataset_path, sheet_name="Sheet1", dtype=str)
+    df = df.drop(columns=["key"], errors="ignore")
 
     df["global_trade_item_number"] = df["global_trade_item_number"].astype(str)
     df["on_hold"] = _coerce_bool(df["on_hold"])
     df["base_cost"] = df["base_cost"].astype(float)
-    df["san_multi_use_qty"] = pd.to_numeric(df["san_multi_use_qty"], errors='coerce').fillna(0).astype(int)
-    df["contract_line"] = pd.to_numeric(df["contract_line"], errors='coerce').fillna(0).astype(int)
+    df["san_multi_use_qty"] = (
+        pd.to_numeric(df["san_multi_use_qty"], errors="coerce").fillna(0).astype(int)
+    )
+    df["contract_line"] = (
+        pd.to_numeric(df["contract_line"], errors="coerce").fillna(0).astype(int)
+    )
 
-    logger.info("Loaded %d contract lines from Excel.", len(df))
+    logger.info("Loaded %d contract lines from %s.", len(df), dataset_path.name)
     return df
 
 # ─── Public Router ────────────────────────────────────────────────────────────
