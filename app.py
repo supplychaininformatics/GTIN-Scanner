@@ -8,9 +8,10 @@ opens to a start form (Sanford ID + location), then the scan loop. Session
 lifecycle is owned entirely here: a session is minted on submit and can only
 be normal-ended from here (the monitor board, pages/board.py, is a passive
 viewer with a force-end escape hatch for a dropped device, not a normal-end
-control). Stacked mobile layout — the scan field, result, KPIs and history
-all run down one column, top to bottom, sized for a phone/handheld screen
-rather than a desktop monitor.
+control). Stacked mobile layout — the scan field, result and history all run
+down one column, top to bottom, sized for a phone/handheld screen rather
+than a desktop monitor. KPI counters live in the header's chip row (see
+ui.components.header_html's kpi_stats), not a separate strip in this column.
 
   * Lookup / API / caching  → engine/, api/, data/  (unchanged)
   * Scan orchestration      → core/lookup.py
@@ -114,6 +115,9 @@ if not st.session_state.session_id:
 engine = get_lookup_engine()
 
 # ── Header ────────────────────────────────────────────────────────────────────
+# The KPI counters fold into the header's chip row on the handheld (denser
+# than a standalone strip above the scan lane) — computed from the
+# session's history-so-far, so this render reflects any scan just recorded.
 st.markdown(
     C.header_html(
         data_source=os.getenv("DATA_SOURCE", "mock"),
@@ -122,6 +126,7 @@ st.markdown(
         location=st.session_state.warehouse_location,
         sanford_id=st.session_state.sanford_id,
         page_name="Handheld",
+        kpi_stats=compute_stats(st.session_state.scan_history),
     ),
     unsafe_allow_html=True,
 )
@@ -176,8 +181,6 @@ with st.container(key="sf_rail"):
 
         warn_slot = st.empty()
 
-    kpi_slot = st.empty()
-
     with st.container(key="sf_sound"):
         st.toggle("Audible alerts", key="sound_on")
 
@@ -221,9 +224,8 @@ history = st.session_state.scan_history
 # ── Result stage ───────────────────────────────────────────────────────────────
 with st.container(key="sf_stage"):
     if last:
-        st.markdown(C.hero_card_html(last), unsafe_allow_html=True)
         st.markdown(
-            C.full_record_table_html(last.get("full_record", {})),
+            C.scan_result_card_html(last, last.get("full_record", {})),
             unsafe_allow_html=True,
         )
 
@@ -263,9 +265,6 @@ with st.container(key="sf_stage"):
         # Absorbs the remaining viewport height and scrolls internally.
         with st.container(key="sf_hist"):
             st.markdown(C.history_table_html(history), unsafe_allow_html=True)
-
-# ── Fill the deferred slot ─────────────────────────────────────────────────────
-kpi_slot.markdown(C.kpi_strip_html(compute_stats(history)), unsafe_allow_html=True)
 
 # ── Client runtime: autofocus, alert tones, Esc, clock, copy, count-up ────────
 scanner_runtime(
