@@ -60,10 +60,7 @@ st.set_page_config(
 
 inject_theme()
 
-# Same identity banner as every other page (logo, wordmark, app title) — this
-# page's own context ("Data Refresh") is conveyed by the section heading
-# below, not by overriding the shared header.
-st.markdown(C.identity_header_html(), unsafe_allow_html=True)
+st.markdown(C.identity_header_html(page_name="Admin"), unsafe_allow_html=True)
 with st.container(key="sf_navlink"):
     st.page_link("pages/board.py", label="← Monitor Board", icon=None)
 

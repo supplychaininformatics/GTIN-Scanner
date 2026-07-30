@@ -77,30 +77,42 @@ def _logo_data_uri() -> str | None:
 
 
 # ── Header ────────────────────────────────────────────────────────────────────
-def _identity_block_html() -> str:
-    """Logo, wordmark and app title — the identity every page's header shares."""
+def _identity_block_html(page_name: str | None = None) -> str:
+    """Logo, wordmark, app title and (optionally) the current page name —
+    the identity every page's header shares."""
     uri = _logo_data_uri()
     logo = (
         f'<div class="sf-logo-plate"><img src="{uri}" alt="Sanford Health"></div>'
         if uri
         else '<div class="sf-logo-fallback">Logo asset missing</div>'
     )
+    page_html = (
+        '<div class="sf-rule"></div>'
+        f'<div class="sf-pagename">{html.escape(page_name)}</div>'
+        if page_name
+        else ""
+    )
     return (
         f"{logo}"
         '<div class="sf-rule"></div>'
-        '<div class="sf-wordmark">Supply Chain Informatics</div>'
+        '<div class="sf-wordmark">Supply Chain<br>'
+        '<span class="sf-wordmark-line2">Informatics</span></div>'
         '<div class="sf-rule"></div>'
         f'<div class="sf-apptitle">{html.escape(APP_TITLE)}</div>'
+        f"{page_html}"
     )
 
 
-def identity_header_html() -> str:
+def identity_header_html(page_name: str | None = None) -> str:
     """The bare top bar — logo, wordmark, app title, no session chips.
 
     Used by pages that render before or without an active scan session (the
     pre-scan gate, the admin page), so every page shows the identical banner.
     """
-    return f'<div class="sf-header"><div class="sf-header-left">{_identity_block_html()}</div></div>'
+    return (
+        '<div class="sf-header"><div class="sf-header-left">'
+        f"{_identity_block_html(page_name)}</div></div>"
+    )
 
 
 def header_html(
@@ -109,6 +121,7 @@ def header_html(
     cache_ttl: str,
     location: str | None = None,
     sanford_id: str | None = None,
+    page_name: str | None = None,
 ) -> str:
     """The fixed top bar: identity block plus live session chips."""
     chips = [
@@ -117,7 +130,7 @@ def header_html(
         ("Cache TTL", html.escape(cache_ttl)),
     ]
     if sanford_id:
-        chips.append(("Sanford ID", html.escape(sanford_id)))
+        chips.append(("Sanford Id/ Name", html.escape(sanford_id)))
     if location:
         chips.append(("Warehouse Location", html.escape(location)))
     chip_html = "".join(
@@ -133,7 +146,7 @@ def header_html(
 
     return f"""
 <div class="sf-header">
-  <div class="sf-header-left">{_identity_block_html()}</div>
+  <div class="sf-header-left">{_identity_block_html(page_name)}</div>
   <div class="sf-header-right">{chip_html}</div>
 </div>
 """
@@ -318,6 +331,13 @@ def history_table_html(history: list[dict]) -> str:
             else f'<td class="sf-mono sf-dim">{_EM_DASH}</td>'
         )
 
+        # A rescan bumps this in place (see core/store.increment_scan) rather
+        # than adding a new row, so >1 is the only signal on the board that a
+        # picker scanned the same item twice — flag it instead of blending in.
+        count = entry.get("Scan Count") or 1
+        count_cls = "sf-mono sf-nowrap" + (" is-rescanned" if count > 1 else " sf-dim")
+        count_cell = f'<td class="{count_cls}">{count}</td>'
+
         # Only the newest row animates in.
         cls = ' class="sf-new"' if i == 0 else ""
         rows.append(
@@ -328,6 +348,7 @@ def history_table_html(history: list[dict]) -> str:
             f"{gtin_cell}"
             f'<td class="sf-mono sf-wrap">{_val(entry.get("Item"))}</td>'
             f"{desc_cell}"
+            f"{count_cell}"
             f"</tr>"
         )
 
@@ -337,11 +358,12 @@ def history_table_html(history: list[dict]) -> str:
     <colgroup>
       <col class="sf-c-time"><col class="sf-c-status"><col class="sf-c-scan">
       <col class="sf-c-gtin"><col class="sf-c-item"><col class="sf-c-desc">
+      <col class="sf-c-count">
     </colgroup>
     <thead>
       <tr>
         <th>Time</th><th>Status</th><th>Scan</th>
-        <th>GTIN</th><th>Item</th><th>Description</th>
+        <th>GTIN</th><th>Item</th><th>Description</th><th>Scan Count</th>
       </tr>
     </thead>
     <tbody>{"".join(rows)}</tbody>
@@ -360,7 +382,7 @@ def session_row_status_key(session: dict) -> str:
 
 
 def session_list_table_html(sessions: list[dict]) -> str:
-    """The monitor board's session list: Sanford ID, location, status, scan
+    """The monitor board's session list: Sanford Id/ Name, location, status, scan
     count, last-scan time. Newest first (caller sorts; this only renders).
 
     Deliberately presentational only — clicking a row to drill in is a
@@ -397,7 +419,7 @@ def session_list_table_html(sessions: list[dict]) -> str:
     </colgroup>
     <thead>
       <tr>
-        <th>Sanford ID</th><th>Location</th><th>Status</th>
+        <th>Sanford Id/ Name</th><th>Location</th><th>Status</th>
         <th>Scans</th><th>Last Scan</th>
       </tr>
     </thead>

@@ -158,10 +158,15 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 .sf-rule { width: 1px; height: 36px; background: rgb(255 255 255 / .25); }
 .sf-wordmark {
     color: var(--sf-surface);
-    font-weight: 600; font-size: 1.0625rem;
-    letter-spacing: .04em; text-transform: uppercase; line-height: 1.2;
+    font-weight: 600; font-size: .6875rem;
+    letter-spacing: .03em; text-transform: uppercase; line-height: 1.3;
     white-space: nowrap;
+    opacity: .75;
 }
+/* "Informatics" is one word, so text-align-last can't stretch it by word
+   spacing — it gets its own wider letter-spacing, hand-tuned to end flush
+   with "Supply Chain" above it at this font/size. */
+.sf-wordmark .sf-wordmark-line2 { letter-spacing: .065em; }
 /* The app's own name — the thing a user actually looks for in a row of
    header tabs, so it outweighs the department wordmark rather than
    deferring to it. */
@@ -170,6 +175,16 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     font-weight: 800; font-size: 1.375rem;
     letter-spacing: .01em; line-height: 1.2;
     white-space: nowrap;
+}
+/* The page name — what actually answers "which page am I on". Plain text
+   after a rule divider, same treatment as the other identity segments,
+   rather than a badge that would out-weight the app title next to it. */
+.sf-pagename {
+    color: var(--sf-surface);
+    font-weight: 700; font-size: 1.375rem;
+    letter-spacing: .01em; line-height: 1.2;
+    white-space: nowrap;
+    opacity: .9;
 }
 .sf-header-right { display: flex; align-items: center; gap: 1.75rem; }
 .sf-chip { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; }
@@ -193,8 +208,8 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 [data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-sf_navlink),
 .st-key-sf_navlink {
     position: fixed !important;
-    top: 14px;
-    right: 2rem;
+    top: calc((var(--sf-header-h) - 32px) / 2);
+    right: -.5rem;
     left: auto !important;
     width: 170px !important;
     max-width: none !important;
@@ -645,6 +660,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 .sf-c-gtin   { width: 150px; }
 .sf-c-item   { width: 110px; }
 .sf-c-desc   { width: 100%; }
+.sf-c-count  { width: 90px; }
 .sf-c-key    { width: 130px; }
 .sf-c-val    { width: 100%; }
 
@@ -656,8 +672,21 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     .sf-c-scan   { width: 118px; }
     .sf-c-gtin   { width: 140px; }
     .sf-c-item   { width: 96px; }
+    .sf-c-count  { width: 76px; }
     .sf-c-key    { width: 110px; }
     .sf-table td, .sf-table th { padding: .5rem .5rem; }
+}
+
+/* A Scan Count > 1 means the picker scanned the same item twice — same amber
+   used for On Hold elsewhere, since both are "look at this" signals. */
+.is-rescanned { color: var(--sf-ink); font-weight: 700; }
+.is-rescanned::before {
+    content: "";
+    display: inline-block;
+    width: .4rem; height: .4rem;
+    margin-right: .35rem;
+    border-radius: 50%;
+    background: var(--sf-amber);
 }
 
 /* Click-to-copy affordance */

@@ -82,7 +82,7 @@ def build_workbook(
     if location:
         df_export.insert(0, "Warehouse Location", location)
     if sanford_id:
-        df_export.insert(0, "Sanford ID", sanford_id)
+        df_export.insert(0, "Sanford Id/ Name", sanford_id)
     if session_id:
         df_export.insert(0, "Session ID", session_id)
 
