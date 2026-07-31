@@ -584,6 +584,13 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     color: var(--sf-muted);
 }
 .sf-section-spacer { flex: 1; }
+/* Subtext directly under a section header (e.g. the handheld's start-session
+   instructions) — sized down from Streamlit's default paragraph size so it
+   reads as a caption under the header, not a competing line of body copy. */
+.sf-section-subtext {
+    font-size: .875rem; color: var(--sf-muted);
+    margin: .3rem 0 .5rem; line-height: 1.4;
+}
 
 /* Title and Export button share one row, vertically centred. Scoped so the
    main 38/62 workspace columns keep their default top alignment. */
