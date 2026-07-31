@@ -854,6 +854,8 @@ _JS = r"""
   /* Durable state lives on the parent window; handlers do not. */
   var S = P.__sf;
   if (!S) { S = P.__sf = { lastNonce: -1, kpi: {}, ctx: null, off: [], clock: null }; }
+  /* Cleared on every mount: one auto-submit per realm (see autoSubmit). */
+  S.submitted = false;
 
   /* Tear down anything bound by the previous (now dead) realm. */
   for (var i = 0; i < S.off.length; i++) { try { S.off[i](); } catch (e) {} }
@@ -941,6 +943,65 @@ _JS = r"""
     focusInput();
   }, true);
   on(P, 'focus', function () { focusInput(); }, false);
+
+  /* ── Auto-submit: hands-free scanning ───────────────────────────────────
+     Most handheld scanners are keyboard emulators configured to append a CR,
+     and Enter inside an st.form already submits — for those guns this code
+     never fires. It exists for guns with no suffix configured, so a picker
+     never has to touch the screen between items.
+
+     There is no "scan complete" event, so the end of a barcode is inferred:
+     the input must look like a GTIN (digits only, 8/12/13/14 long), the
+     keystrokes must have arrived at scanner speed rather than human speed,
+     and input must then go quiet. Gating on speed is what keeps a human
+     typing a GTIN by hand — who pauses mid-number — from firing a lookup on
+     a partial code and recording a spurious Not Found. */
+  var SCAN_GAP_MS = 35;    /* Slowest inter-keystroke gap still called a gun. */
+  var QUIET_MS = 80;       /* Silence after the last key that ends a barcode. */
+  var GTIN_LENGTHS = { 8: 1, 12: 1, 13: 1, 14: 1 };
+
+  var lastKeyAt = 0, humanTyped = false, quietTimer = null;
+
+  function submitBtn() {
+    return D.querySelector('.st-key-sf_scan button[kind="formSubmit"]')
+        || D.querySelector('.st-key-sf_scan button');
+  }
+
+  /* One auto-submit per runtime mount. The submit triggers st.rerun(), which
+     tears this realm down and mounts a fresh one with the flag clear — so a
+     scan landing mid-round-trip cannot double-fire a lookup against a form
+     Streamlit is already rebuilding. */
+  function autoSubmit() {
+    if (S.submitted) return;
+    var el = input();
+    if (!el) return;
+    var v = (el.value || '').trim();
+    if (!GTIN_LENGTHS[v.length] || !/^\d+$/.test(v)) return;
+    var btn = submitBtn();
+    if (!btn) return;
+    S.submitted = true;
+    btn.click();
+  }
+
+  on(D, 'input', function (e) {
+    var el = input();
+    if (!el || e.target !== el) return;
+
+    var now = (P.performance && P.performance.now) ? P.performance.now() : Date.now();
+    var gap = now - lastKeyAt;
+    lastKeyAt = now;
+
+    /* A field going from empty (cleared form, Esc, fresh mount) starts a new
+       barcode — the gap back to the previous field's last keystroke says
+       nothing about who is typing this one. */
+    if ((el.value || '').length <= 1) humanTyped = false;
+    else if (gap > SCAN_GAP_MS) humanTyped = true;
+
+    if (quietTimer) { P.clearTimeout(quietTimer); quietTimer = null; }
+    if (humanTyped) return;
+    quietTimer = P.setTimeout(function () { quietTimer = null; autoSubmit(); }, QUIET_MS);
+  }, true);
+  S.off.push(function () { if (quietTimer) { P.clearTimeout(quietTimer); quietTimer = null; } });
 
   /* ── Esc: drop the result and re-arm ──────────────────────────────────── */
   on(D, 'keydown', function (e) {
