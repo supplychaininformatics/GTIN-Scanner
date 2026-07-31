@@ -202,20 +202,24 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     font-size: .875rem; color: rgb(255 255 255 / .95); font-weight: 600;
     font-family: var(--sf-mono); font-variant-numeric: tabular-nums;
 }
-/* Handheld-only KPI chips (see ui.components._kpi_chip_html) folded into the
-   header's chip row in place of the old standalone KPI strip. Not-Found /
-   On-Hold light up the moment they're non-zero, same as the KPI tiles did. */
+/* Handheld-only KPI chips (see ui.components._kpi_chip_html), arranged as a
+   tidy 2x2 grid rather than inline with the session chips. Not-Found lights
+   up the moment it's non-zero, same as the old KPI tiles did. */
 .sf-chip.is-alert-red .sf-chip-v { color: var(--sf-red); }
-.sf-chip.is-alert-amber .sf-chip-v { color: var(--sf-amber); }
+.sf-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    grid-auto-rows: auto;
+    gap: .5rem 1.75rem;
+}
 
 /* Phone-width handheld: the identity block plus a full chip row (KPIs,
-   session info, clock) no longer fit on one line, so the header wraps
-   across as many rows as the content needs instead of clipping/overlapping.
-   The 116px here is only a first-paint fallback (picked for a mid-range
-   chip count) — the client runtime's syncHeaderHeight() immediately
-   overwrites --sf-header-h with the header's real measured height, since
-   the row count varies with KPI values and Sanford Id/Location text
-   length. */
+   session info) no longer fit on one line, so the header wraps across as
+   many rows as the content needs instead of clipping/overlapping. The
+   116px here is only a first-paint fallback (picked for a mid-range chip
+   count) — the client runtime's syncHeaderHeight() immediately overwrites
+   --sf-header-h with the header's real measured height, since the row
+   count varies with KPI values and Sanford Id/Location text length. */
 @media (max-width: 640px) {
     :root { --sf-header-h: 116px; }
     .sf-header {
@@ -226,6 +230,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
         row-gap: .4rem;
     }
     .sf-header-right { flex-wrap: wrap; row-gap: .4rem; gap: .9rem 1.1rem; }
+    .sf-kpi-grid { gap: .4rem 1.1rem; }
 }
 
 /* ── Cross-page nav (Monitor Board ⇄ Admin only — see PLAN.md: the handheld
