@@ -46,7 +46,7 @@ store.purge_old_sessions()
 
 st.markdown(C.identity_header_html(page_name="Monitor Board"), unsafe_allow_html=True)
 with st.container(key="sf_navlink"):
-    st.page_link("pages/admin.py", label="Admin →", icon=None)
+    st.page_link("pages/admin.py", label="Admin Tools →", icon=None)
 
 # ── Device onboarding: static link, not per-session ─────────────────────────
 # See PLAN.md "Device onboarding": open this URL directly on the handheld's

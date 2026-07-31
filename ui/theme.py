@@ -219,18 +219,57 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
    116px here is only a first-paint fallback (picked for a mid-range chip
    count) — the client runtime's syncHeaderHeight() immediately overwrites
    --sf-header-h with the header's real measured height, since the row
-   count varies with KPI values and Sanford Id/Location text length. */
+   count varies with KPI values and Sanford Id/Location text length.
+
+   All six values (Sanford Id/Name, Warehouse Location, Total, DW Hits, API
+   Hits, Not Found) become one uniform 3x2 grid on a PMS 284 band, instead
+   of the two wide session chips sitting apart from the 2x2 KPI grid — a
+   single evenly-spread block reads better at this width than two. */
 @media (max-width: 640px) {
-    :root { --sf-header-h: 116px; }
+    :root { --sf-header-h: 172px; }
     .sf-header {
         flex-wrap: wrap;
         height: auto;
         min-height: var(--sf-header-h);
-        padding: .6rem 1rem;
-        row-gap: .4rem;
+        padding: .6rem 1rem 0 1rem;
+        row-gap: .6rem;
     }
-    .sf-header-right { flex-wrap: wrap; row-gap: .4rem; gap: .9rem 1.1rem; }
-    .sf-kpi-grid { gap: .4rem 1.1rem; }
+    .sf-header-right {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 0;
+        width: calc(100% + 2rem);
+        margin: .6rem -1rem -1px -1rem;
+        background: var(--sf-light-blue);
+    }
+    .sf-header-right .sf-chip,
+    .sf-kpi-grid .sf-chip {
+        align-items: center;
+        text-align: center;
+        padding: .5rem .25rem;
+    }
+    .sf-header-right .sf-chip-k,
+    .sf-kpi-grid .sf-chip-k {
+        color: color-mix(in srgb, var(--sf-blue) 70%, transparent);
+    }
+    .sf-header-right .sf-chip-v,
+    .sf-kpi-grid .sf-chip-v {
+        color: var(--sf-blue);
+    }
+    .sf-header-right .sf-chip.is-alert-red .sf-chip-v {
+        color: var(--sf-red);
+    }
+    .sf-kpi-grid {
+        display: contents;
+    }
+    /* The End Session button (below) is position:fixed to the bottom-right
+       corner, floating outside document flow — on a phone-width column the
+       last card (the empty-state "Ready to scan" box) is exactly as wide as
+       the viewport, so without reserved space its bottom-right corner sits
+       right under the button. Pad the container by the button's own
+       footprint (34px height + 1.25rem offset + margin) so content always
+       clears it. */
+    .block-container { padding-bottom: 4.5rem !important; }
 }
 
 /* ── Cross-page nav (Monitor Board ⇄ Admin only — see PLAN.md: the handheld
