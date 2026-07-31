@@ -142,9 +142,8 @@ def _kpi_chip_html(stats: dict[str, int]) -> str:
     out = []
     for key, label in _KPI_CHIP_FIELDS:
         value = stats.get(key, 0)
-        alert_cls = " is-alert-red" if key == "not_found" and value else ""
         out.append(
-            f'<div class="sf-chip{alert_cls}"><span class="sf-chip-k">{label}</span>'
+            f'<div class="sf-chip"><span class="sf-chip-k">{label}</span>'
             f'<span class="sf-chip-v" data-sf-key="{key}" data-sf-val="{value}">{value}</span></div>'
         )
     return f'<div class="sf-kpi-grid">{"".join(out)}</div>'

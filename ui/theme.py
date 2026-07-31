@@ -82,12 +82,12 @@ def _root_vars() -> str:
     --sf-success-tint: color-mix(in srgb, var(--sf-success) 10%, var(--sf-surface));
     --sf-lightblue-tint: color-mix(in srgb, var(--sf-light-blue) 16%, var(--sf-surface));
     --sf-amber-tint:   color-mix(in srgb, var(--sf-amber) 16%, var(--sf-surface));
-    --sf-red-tint:     color-mix(in srgb, var(--sf-red) 9%, var(--sf-surface));
+    --sf-gray-tint:    color-mix(in srgb, var(--sf-gray) 16%, var(--sf-surface));
 
     --sf-success-edge: color-mix(in srgb, var(--sf-success) 35%, var(--sf-surface));
     --sf-lightblue-edge: color-mix(in srgb, var(--sf-light-blue) 55%, var(--sf-surface));
     --sf-amber-edge:   color-mix(in srgb, var(--sf-amber) 50%, var(--sf-surface));
-    --sf-red-edge:     color-mix(in srgb, var(--sf-red) 35%, var(--sf-surface));
+    --sf-gray-edge:    color-mix(in srgb, var(--sf-gray) 55%, var(--sf-surface));
 
     --sf-blue-hover:   color-mix(in srgb, var(--sf-blue) 82%, var(--sf-light-blue));
     --sf-shadow:       color-mix(in srgb, var(--sf-ink) 10%, transparent);
@@ -203,9 +203,10 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     font-family: var(--sf-mono); font-variant-numeric: tabular-nums;
 }
 /* Handheld-only KPI chips (see ui.components._kpi_chip_html), arranged as a
-   tidy 2x2 grid rather than inline with the session chips. Not-Found lights
-   up the moment it's non-zero, same as the old KPI tiles did. */
-.sf-chip.is-alert-red .sf-chip-v { color: var(--sf-red); }
+   tidy 2x2 grid rather than inline with the session chips. Not-Found used to
+   flash red the moment it went non-zero, but that read as an alarm during
+   routine warehouse scanning — it now stays the same neutral tone as every
+   other KPI value. */
 .sf-kpi-grid {
     display: grid;
     grid-template-columns: repeat(2, auto);
@@ -255,9 +256,6 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     .sf-header-right .sf-chip-v,
     .sf-kpi-grid .sf-chip-v {
         color: var(--sf-blue);
-    }
-    .sf-header-right .sf-chip.is-alert-red .sf-chip-v {
-        color: var(--sf-red);
     }
     .sf-kpi-grid {
         display: contents;
@@ -534,7 +532,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 .sf-pill-glyph { font-size: .8125rem; line-height: 1; }
 .sf-pill.is-cache    { color: var(--sf-success);    background: var(--sf-success-tint);    border-color: var(--sf-success-edge); }
 .sf-pill.is-api      { color: var(--sf-blue);       background: var(--sf-lightblue-tint);  border-color: var(--sf-lightblue-edge); }
-.sf-pill.is-notfound { color: var(--sf-red);        background: var(--sf-red-tint);        border-color: var(--sf-red-edge); }
+.sf-pill.is-notfound { color: var(--sf-ink);        background: var(--sf-gray-tint);        border-color: var(--sf-gray-edge); }
 .sf-pill.is-hold     { color: var(--sf-ink);        background: var(--sf-amber-tint);      border-color: var(--sf-amber); }
 
 /* ── Hero result card ───────────────────────────────────────────────────── */
@@ -549,7 +547,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 }
 .sf-hero.is-cache    { border-left-color: var(--sf-success); }
 .sf-hero.is-api      { border-left-color: var(--sf-light-blue); }
-.sf-hero.is-notfound { border-left-color: var(--sf-red); }
+.sf-hero.is-notfound { border-left-color: var(--sf-gray); }
 .sf-hero.is-hold     { border-left-color: var(--sf-amber); }
 /* Rescans keep their underlying status colour everywhere else (pill, left
    edge), but the sand accent — used nowhere else — flags this one as a
