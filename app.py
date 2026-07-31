@@ -86,7 +86,7 @@ if not st.session_state.session_id:
             del st.query_params["sid"]
 
     st.markdown(C.identity_header_html(page_name="Handheld"), unsafe_allow_html=True)
-    st.markdown(C.section_html("Start New Session +"), unsafe_allow_html=True)
+    st.markdown(C.section_html("Start New Session"), unsafe_allow_html=True)
     st.write("Scan your badge or type your Sanford Id/ Name, then enter the current warehouse location.")
     with st.form("start_form"):
         sanford_id_input = st.text_input(
