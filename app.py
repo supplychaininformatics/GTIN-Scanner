@@ -230,9 +230,6 @@ with st.container(key="sf_stage"):
             unsafe_allow_html=True,
         )
 
-        if last.get("source") == "api" and last.get("api_result") is not None:
-            with st.expander("Raw AccessGUDID response"):
-                st.json(last["api_result"].payload)
     else:
         st.markdown(C.empty_hero_html(), unsafe_allow_html=True)
 
@@ -265,7 +262,7 @@ with st.container(key="sf_stage"):
                 )
         # Absorbs the remaining viewport height and scrolls internally.
         with st.container(key="sf_hist"):
-            st.markdown(C.history_table_html(history), unsafe_allow_html=True)
+            st.markdown(C.handheld_history_table_html(history), unsafe_allow_html=True)
 
 # ── Client runtime: autofocus, alert tones, Esc, clock, copy, count-up ────────
 scanner_runtime(

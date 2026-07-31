@@ -599,11 +599,6 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     font-size: 1.25rem; font-weight: 700; color: var(--sf-blue);
     letter-spacing: .04em;
 }
-.sf-hero-time {
-    margin-left: auto;
-    font-family: var(--sf-mono); font-size: .8125rem; color: var(--sf-muted);
-}
-
 .sf-empty {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: .5rem;
