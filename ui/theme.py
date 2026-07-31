@@ -136,7 +136,7 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     padding: 0 2rem;
     box-shadow: 0 2px 12px var(--sf-shadow);
 }
-.sf-header-left { display: flex; align-items: center; gap: 1.5rem; }
+.sf-header-left { display: flex; align-items: center; gap: 1.5rem; flex-shrink: 0; }
 /* The mark is two-tone on white and must never be recoloured — so it sits on
    its own white plate rather than being inverted onto the blue. */
 .sf-logo-plate {
@@ -176,6 +176,12 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     letter-spacing: .01em; line-height: 1.2;
     white-space: nowrap;
 }
+/* Handheld only: "Warehouse" / "GTIN Scanner" stacked in place of the
+   single-line app title, sized to still clear the fixed header height. */
+.sf-apptitle-stacked {
+    font-size: 1rem;
+    line-height: 1.15;
+}
 /* The page name — what actually answers "which page am I on". Plain text
    after a rule divider, same treatment as the other identity segments,
    rather than a badge that would out-weight the app title next to it. */
@@ -201,6 +207,22 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
    On-Hold light up the moment they're non-zero, same as the KPI tiles did. */
 .sf-chip.is-alert-red .sf-chip-v { color: var(--sf-red); }
 .sf-chip.is-alert-amber .sf-chip-v { color: var(--sf-amber); }
+
+/* Phone-width handheld: the identity block plus a full chip row (KPIs,
+   session info, clock) no longer fit on one line, so the header wraps to a
+   second row instead of clipping/overlapping. --sf-header-h grows to match
+   so the fixed header still clears the content below it. */
+@media (max-width: 640px) {
+    :root { --sf-header-h: 116px; }
+    .sf-header {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: var(--sf-header-h);
+        padding: .6rem 1rem;
+        row-gap: .4rem;
+    }
+    .sf-header-right { flex-wrap: wrap; row-gap: .4rem; gap: .9rem 1.1rem; }
+}
 
 /* ── Cross-page nav (Monitor Board ⇄ Admin only — see PLAN.md: the handheld
    is a picker-only surface and deliberately carries no link to either) ────

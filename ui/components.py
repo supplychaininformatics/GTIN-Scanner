@@ -79,7 +79,18 @@ def _logo_data_uri() -> str | None:
 # ── Header ────────────────────────────────────────────────────────────────────
 def _identity_block_html(page_name: str | None = None) -> str:
     """Logo, wordmark, app title and (optionally) the current page name —
-    the identity every page's header shares."""
+    the identity every page's header shares.
+
+    The handheld is a special case: no logo (screen is too narrow to spare
+    the space) and the app title splits across two lines instead of the
+    page-name suffix the other pages use."""
+    if page_name == "Handheld":
+        return (
+            '<div class="sf-wordmark">Supply Chain<br>'
+            '<span class="sf-wordmark-line2">Informatics</span></div>'
+            '<div class="sf-rule"></div>'
+            '<div class="sf-apptitle sf-apptitle-stacked">Warehouse<br>GTIN Scanner</div>'
+        )
     uri = _logo_data_uri()
     logo = (
         f'<div class="sf-logo-plate"><img src="{uri}" alt="Sanford Health"></div>'
