@@ -131,35 +131,26 @@ _KPI_CHIP_FIELDS = (
     ("cache", "DW Hits"),
     ("api", "API Hits"),
     ("not_found", "Not Found"),
-    ("on_hold", "On Hold"),
 )
 
 
 def _kpi_chip_html(stats: dict[str, int]) -> str:
-    """Compact KPI chips for the handheld header — the same visual language
-    as the session chips (Location, Sanford Id/ Name), so the five scan
-    counters live in the header bar instead of their own strip taking up
-    scroll space above the scan lane. Not used by the monitor board or
-    admin page, which never pass `kpi_stats` to header_html()."""
+    """Compact KPI chips for the handheld header, laid out as a 2x2 grid
+    (see .sf-kpi-grid) instead of inline with the session chips. Not used
+    by the monitor board or admin page, which never pass `kpi_stats` to
+    header_html()."""
     out = []
     for key, label in _KPI_CHIP_FIELDS:
         value = stats.get(key, 0)
-        alert_cls = ""
-        if key == "not_found" and value:
-            alert_cls = " is-alert-red"
-        elif key == "on_hold" and value:
-            alert_cls = " is-alert-amber"
+        alert_cls = " is-alert-red" if key == "not_found" and value else ""
         out.append(
             f'<div class="sf-chip{alert_cls}"><span class="sf-chip-k">{label}</span>'
             f'<span class="sf-chip-v" data-sf-key="{key}" data-sf-val="{value}">{value}</span></div>'
         )
-    return "".join(out)
+    return f'<div class="sf-kpi-grid">{"".join(out)}</div>'
 
 
 def header_html(
-    data_source: str,
-    contract_lines: int,
-    cache_ttl: str,
     location: str | None = None,
     sanford_id: str | None = None,
     page_name: str | None = None,
@@ -170,11 +161,7 @@ def header_html(
     `kpi_stats` is handheld-only (see _kpi_chip_html) — omitted by the
     monitor board and admin page.
     """
-    chips = [
-        ("Data source", html.escape(data_source.upper())),
-        ("Contract lines", f"{contract_lines:,}"),
-        ("Cache TTL", html.escape(cache_ttl)),
-    ]
+    chips = []
     if sanford_id:
         chips.append(("Sanford Id/ Name", html.escape(sanford_id)))
     if location:
@@ -184,18 +171,12 @@ def header_html(
         f'<span class="sf-chip-v">{v}</span></div>'
         for k, v in chips
     )
-    if kpi_stats is not None:
-        chip_html += _kpi_chip_html(kpi_stats)
-    # The clock is filled and ticked by the client runtime.
-    chip_html += (
-        '<div class="sf-chip"><span class="sf-chip-k">Session</span>'
-        '<span class="sf-chip-v" id="sf-clock">--:--:--</span></div>'
-    )
+    kpi_html = _kpi_chip_html(kpi_stats) if kpi_stats is not None else ""
 
     return f"""
 <div class="sf-header">
   <div class="sf-header-left">{_identity_block_html(page_name)}</div>
-  <div class="sf-header-right">{chip_html}</div>
+  <div class="sf-header-right">{chip_html}{kpi_html}</div>
 </div>
 """
 

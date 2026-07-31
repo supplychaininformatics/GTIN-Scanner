@@ -119,14 +119,11 @@ if not st.session_state.session_id:
 engine = get_lookup_engine()
 
 # ── Header ────────────────────────────────────────────────────────────────────
-# The KPI counters fold into the header's chip row on the handheld (denser
-# than a standalone strip above the scan lane) — computed from the
-# session's history-so-far, so this render reflects any scan just recorded.
+# The KPI counters render as a 2x2 grid in the header (see .sf-kpi-grid) —
+# computed from the session's history-so-far, so this render reflects any
+# scan just recorded.
 st.markdown(
     C.header_html(
-        data_source=os.getenv("DATA_SOURCE", "mock"),
-        contract_lines=engine.size,
-        cache_ttl="24h",
         location=st.session_state.warehouse_location,
         sanford_id=st.session_state.sanford_id,
         page_name="Handheld",
