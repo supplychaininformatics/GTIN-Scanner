@@ -31,6 +31,7 @@ import logging
 import os
 
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from core import store
@@ -108,8 +109,22 @@ if not st.session_state.session_id:
         location_candidate = location_input.strip()
         if sanford_id_candidate and location_candidate:
             start_session(sanford_id_candidate, location_candidate)
-            st.query_params["sid"] = st.session_state.session_id
-            st.rerun()
+            # st.query_params only does history.replaceState under the hood —
+            # a client-side URL rewrite with no real navigation. Mobile
+            # browsers routinely restore the *originally loaded* URL (no
+            # ?sid) on a hard refresh or after the tab is backgrounded/
+            # evicted, which was dropping the picker back to the start gate
+            # mid-session. A real navigation to the ?sid URL makes it the
+            # document the browser actually reloads.
+            components.html(
+                f"""<script>
+                    window.parent.location.replace(
+                        window.parent.location.pathname + "?sid={st.session_state.session_id}"
+                    );
+                </script>""",
+                height=0,
+            )
+            st.stop()
         elif not sanford_id_candidate:
             st.error("Enter or scan a Sanford Id/ Name to continue.")
         else:
@@ -211,6 +226,12 @@ if submitted and gtin_input.strip():
             after_api=progress_slot.empty,
         )
         record_scan(result)
+    # The header above (with its KPI chip row) was already drawn earlier in
+    # this same script run, from history-before-this-scan — st.markdown has
+    # no way to go back and redraw it. Rerunning is the only way to get the
+    # header to reflect the scan just recorded, matching every other
+    # state-mutating action on this page (start_session, end_session).
+    st.rerun()
 elif submitted:
     warn_slot.markdown(
         '<div class="sf-hint" style="margin-top:.6rem">'
