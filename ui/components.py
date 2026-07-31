@@ -255,7 +255,6 @@ def scan_result_card_html(result: dict, full_record: dict) -> str:
       <span class="sf-hero-gtin-label">GTIN</span>
       <span class="sf-hero-gtin" data-sf-copy="{gtin}" title="Click to copy">{gtin}</span>
     </span>
-    <span class="sf-hero-time">{_val(result.get("time"))}</span>
   </div>
   <div class="sf-table-scroll sf-hero-record">
     <table class="sf-table sf-kv">
@@ -281,8 +280,6 @@ def empty_hero_html() -> str:
 # ── Full record ───────────────────────────────────────────────────────────────
 _FULL_RECORD_FIELDS = [
     ("Scan", True), ("GTIN", True), ("Item", True), ("Description", False),
-    ("Company", False), ("Brand", False), ("GTIN UOM", True), ("UOU", True),
-    ("HIBCC", True), ("LAWSON ID", True), ("Lawson UOM", True),
 ]
 
 
@@ -353,6 +350,55 @@ def history_table_html(history: list[dict]) -> str:
       <tr>
         <th>Time</th><th>Status</th><th>Scan</th>
         <th>GTIN</th><th>Item</th><th>Description</th><th>Scan Count</th>
+      </tr>
+    </thead>
+    <tbody>{"".join(rows)}</tbody>
+  </table>
+</div>
+"""
+
+
+def handheld_history_table_html(history: list[dict]) -> str:
+    """Handheld-only condensed history: time (hh:mm), status, scan, item.
+    GTIN/Description/Scan Count still live in the full history_table_html()
+    used by the monitor board, and in the Excel export."""
+    rows = []
+    for i, entry in enumerate(reversed(history)):
+        key = entry.get("status_key", "notfound")
+        scan = str(entry.get("Scan") or "").strip()
+        # Stored as %H:%M:%S (matches export); trim to hh:mm for this table.
+        time_str = str(entry.get("time") or "")[:5]
+
+        # The raw scan (unlike GTIN) can run longer than 14 digits on a composite
+        # GS1 barcode, so it wraps rather than forcing a fixed nowrap width.
+        scan_cell = (
+            f'<td class="sf-mono sf-wrap" data-sf-copy="{html.escape(scan)}" '
+            f'title="Click to copy">{html.escape(scan)}</td>'
+            if scan
+            else f'<td class="sf-mono sf-dim">{_EM_DASH}</td>'
+        )
+
+        # Only the newest row animates in.
+        cls = ' class="sf-new"' if i == 0 else ""
+        rows.append(
+            f"<tr{cls}>"
+            f'<td class="sf-mono sf-dim sf-nowrap">{_val(time_str)}</td>'
+            f"<td>{status_pill_html(key)}</td>"
+            f"{scan_cell}"
+            f'<td class="sf-mono sf-wrap">{_val(entry.get("Item"))}</td>'
+            f"</tr>"
+        )
+
+    return f"""
+<div class="sf-table-scroll is-history">
+  <table class="sf-table">
+    <colgroup>
+      <col class="sf-c-time"><col class="sf-c-status"><col class="sf-c-scan">
+      <col class="sf-c-item">
+    </colgroup>
+    <thead>
+      <tr>
+        <th>Time</th><th>Status</th><th>Scan</th><th>Item</th>
       </tr>
     </thead>
     <tbody>{"".join(rows)}</tbody>
