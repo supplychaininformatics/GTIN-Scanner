@@ -209,9 +209,13 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 .sf-chip.is-alert-amber .sf-chip-v { color: var(--sf-amber); }
 
 /* Phone-width handheld: the identity block plus a full chip row (KPIs,
-   session info, clock) no longer fit on one line, so the header wraps to a
-   second row instead of clipping/overlapping. --sf-header-h grows to match
-   so the fixed header still clears the content below it. */
+   session info, clock) no longer fit on one line, so the header wraps
+   across as many rows as the content needs instead of clipping/overlapping.
+   The 116px here is only a first-paint fallback (picked for a mid-range
+   chip count) — the client runtime's syncHeaderHeight() immediately
+   overwrites --sf-header-h with the header's real measured height, since
+   the row count varies with KPI values and Sanford Id/Location text
+   length. */
 @media (max-width: 640px) {
     :root { --sf-header-h: 116px; }
     .sf-header {
@@ -936,6 +940,26 @@ _JS = r"""
       done();
     } catch (err2) {}
   }, true);
+
+  /* ── Header height sync ───────────────────────────────────────────────────
+     Below the narrow-screen breakpoint the header wraps into a variable
+     number of rows (chip count and text length both vary), so a guessed
+     fixed --sf-header-h clips or gaps the content below it. A
+     ResizeObserver keeps the variable pinned to the header's real height on
+     every layout change instead. */
+  function syncHeaderHeight() {
+    var header = D.querySelector('.sf-header');
+    if (!header || !P.ResizeObserver) return;
+    var apply = function () {
+      var h = header.getBoundingClientRect().height;
+      if (h > 0) D.documentElement.style.setProperty('--sf-header-h', h + 'px');
+    };
+    var ro = new P.ResizeObserver(apply);
+    ro.observe(header);
+    apply();
+    S.off.push(function () { try { ro.disconnect(); } catch (e) {} });
+  }
+  syncHeaderHeight();
 
   /* ── Live session clock ───────────────────────────────────────────────── */
   function pad(n) { return (n < 10 ? '0' : '') + n; }
