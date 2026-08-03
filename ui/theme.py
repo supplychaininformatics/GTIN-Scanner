@@ -920,11 +920,23 @@ _JS = r"""
     return D.querySelector('.st-key-sf_scan input')
         || D.querySelector('input[aria-label="GTIN"]');
   }
+  /* Keeping the lane armed means focusing the field on every mount — and every
+     scan reruns, so on a touch device that would raise the soft keyboard after
+     each item, covering the result the picker just scanned. inputmode="none"
+     keeps the field focused and still receiving keystrokes (a gun is a keyboard,
+     so scanning is unaffected) while telling the browser not to open one.
+
+     Manual typing is still supported: a real tap on the field restores the
+     keyboard, and it stays available until the next programmatic re-arm. */
+  function armQuietly(el) {
+    try { el.setAttribute('inputmode', 'none'); } catch (e) {}
+  }
   function focusInput() {
     var tries = 0;
     (function attempt() {
       var el = input();
       if (el) {
+        armQuietly(el);
         if (D.activeElement !== el) {
           try { el.focus({ preventScroll: true }); el.select(); } catch (e) {}
         }
@@ -933,6 +945,19 @@ _JS = r"""
       if (tries++ < 40) P.setTimeout(attempt, 50);
     })();
   }
+
+  /* A tap on the field is a human asking to type. Drop inputmode and re-focus
+     so the keyboard opens: the attribute is read when the field gains focus, so
+     changing it on an already-focused field needs a blur/focus cycle. */
+  on(D, 'pointerdown', function (e) {
+    var el = input();
+    if (!el || !e.target || e.target !== el) return;
+    if (el.getAttribute('inputmode') !== 'none') return;
+    try { el.removeAttribute('inputmode'); } catch (err) {}
+    if (D.activeElement === el) {
+      try { el.blur(); el.focus({ preventScroll: true }); } catch (err) {}
+    }
+  }, true);
 
   /* Clicking dead space re-arms the gun. Controls and tables are left alone so
      the user can still press buttons and select text in order to read it. */
