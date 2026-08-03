@@ -1,0 +1,76 @@
+# .github/workflows/purge-expired.yml
+# Daily retention sweep against Neon, running scripts/purge_expired.sql.
+#
+# Why here and not in the database: Neon computes scale to zero when idle, so
+# there is no always-on background worker for pg_cron to run in — pg_cron is
+# not available on the free tier. The schedule has to live outside the
+# database, and Actions is free for this.
+#
+# Why not rely on core/session._maybe_purge: that only fires while somebody has
+# the app open, which is exactly not the case over a quiet weekend — the stretch
+# where expired data would otherwise sit around longest.
+#
+# ⚠ GitHub disables scheduled workflows in a repository with no commit activity
+# for 60 days, and emails the repo admins when it does. If this repo goes quiet,
+# check that this workflow is still enabled under Actions.
+
+name: Purge expired scan data
+
+on:
+  schedule:
+    # 08:17 UTC daily. Deliberately off the hour — GitHub's scheduler is
+    # busiest at :00 and delays runs there. Actions cron is best-effort and can
+    # drift by several minutes, which is irrelevant for a daily sweep.
+    - cron: "17 8 * * *"
+  # Lets you run the sweep on demand from the Actions tab, which is also the
+  # quickest way to smoke-test the connection string after rotating it.
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: "Override the retention window for this run only"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+# A sweep is not worth queueing behind another sweep; if a manual run overlaps
+# the nightly one, the newer invocation is the one worth keeping.
+concurrency:
+  group: purge-expired
+  cancel-in-progress: false
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure psql is available
+        # GitHub's Ubuntu images ship postgresql-client already; the install is
+        # a fallback for when a future image drops it, and costs nothing when
+        # psql is present.
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+          psql --version
+
+      - name: Purge sessions past retention
+        env:
+          # Repo secret: Settings → Secrets and variables → Actions.
+          # Use the pooled connection string from the Neon dashboard (the host
+          # with the -pooler suffix) and keep ?sslmode=require on it.
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          RETENTION_DAYS: ${{ inputs.retention_days || '3' }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::NEON_DATABASE_URL secret is not set — nothing was purged."
+            exit 1
+          fi
+          psql "$DATABASE_URL" \
+            -v ON_ERROR_STOP=1 \
+            -v retention_days="$RETENTION_DAYS" \
+            -f scripts/purge_expired.sql
