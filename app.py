@@ -87,6 +87,15 @@ if not st.session_state.session_id:
             del st.query_params["sid"]
 
     st.markdown(C.identity_header_html(page_name="Handheld"), unsafe_allow_html=True)
+    # Set when a supervisor force-ended this device's session out from under it
+    # (see the liveness check below). Shown once, on the gate the picker lands
+    # on, so the bounce reads as a deliberate action rather than a crash.
+    if st.session_state.pop("force_ended_notice", False):
+        st.warning(
+            "This session was ended from the monitor board or admin page. "
+            "Any scans you had already made were saved and can still be "
+            "exported from the board. Start a new session to keep scanning."
+        )
     st.markdown(C.section_html("Start New Session"), unsafe_allow_html=True)
     st.markdown(
         '<p class="sf-section-subtext">Scan your badge or type your Sanford Id/ Name, '
@@ -130,6 +139,29 @@ if not st.session_state.session_id:
         else:
             st.error("Enter a warehouse location to continue.")
     st.stop()
+
+# ── Liveness: has this session been force-ended out from under this device? ───
+# The resume gate above only runs when session_state was empty, so a handheld
+# already in the scan loop would never notice a board/admin Force End — it
+# would keep scanning against an ended session, and those scans would keep
+# landing on it (core.store.record_scan does not check status). Re-reading the
+# row once per rerun is what makes Force End actually reach the device it is
+# meant to stop.
+#
+# Local state is cleared directly rather than via end_session(): the store row
+# is already ended, and calling end_session() would overwrite the supervisor's
+# ended_at with a later timestamp, corrupting the audit trail of when the
+# force-end actually happened.
+current = store.get_session(st.session_state.session_id)
+if current is None or current["status"] != store.STATUS_ACTIVE:
+    st.session_state.session_id = None
+    st.session_state.sanford_id = None
+    st.session_state.warehouse_location = None
+    st.session_state.scan_history = []
+    st.session_state.last_result = None
+    st.session_state.force_ended_notice = True
+    st.query_params.clear()
+    st.rerun()
 
 engine = get_lookup_engine()
 
