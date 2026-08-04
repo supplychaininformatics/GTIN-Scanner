@@ -25,5 +25,11 @@ data/cache/
 .mypy_cache/
 .ruff_cache/
 
+# Graphify — track the current graph (graph.json, graph.html, GRAPH_REPORT.md,
+# manifest.json), but not its query cache or the dated curated-graph backups
+# `graphify update` writes on every run.
+graphify-out/cache/
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+
 # macOS
 .DS_Store
