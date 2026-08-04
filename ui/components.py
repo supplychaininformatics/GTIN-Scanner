@@ -119,9 +119,12 @@ def identity_header_html(page_name: str | None = None) -> str:
 
     Used by pages that render before or without an active scan session (the
     pre-scan gate, the admin page), so every page shows the identical banner.
+
+    `is-identity-only` tells the stylesheet there is no chip band under the
+    bar, so the content below starts right against it (see ui/theme.py).
     """
     return (
-        '<div class="sf-header"><div class="sf-header-left">'
+        '<div class="sf-header is-identity-only"><div class="sf-header-left">'
         f"{_identity_block_html(page_name)}</div></div>"
     )
 
