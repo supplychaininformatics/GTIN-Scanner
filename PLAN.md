@@ -1,6 +1,9 @@
 # GTIN Scanner — Handheld + Monitor Two-Surface Plan
 
-Status: design locked, ready to build. Not yet implemented.
+Status: implemented and merged to `main`. This document is kept as the
+design record — see notes inline where the shipped version diverged (mainly
+Postgres/Neon replacing the originally planned SQLite store; see README.md →
+"Setting Up the Database").
 
 ## Core model
 
@@ -62,11 +65,35 @@ later if it's a real problem in the warehouse.
 - Export ends up with one row per GTIN per session, with a `Scan Count`
   column — no quantity information is destroyed, and the export stays clean.
 
-## Data model — SQLite, WAL mode, on the app server
+## Data model — Postgres (Neon), replacing the SQLite plan below
 
-Replaces the current whole-file JSON autosave (`core/autosave.py`) with an
+Originally planned as SQLite in WAL mode on the app server (schema kept
+below for the record). Shipped on **Postgres, hosted on Neon**, instead —
+Streamlit Cloud restarts the container freely, and SQLite on local disk
+loses scan history on every restart. Neon lives outside the app's lifecycle,
+so a restart is invisible to pickers mid-shift. See `core/store.py`'s module
+docstring for the full rationale, `migrations/001_initial.sql` for the
+as-shipped schema, and README.md → "Setting Up the Database" for connecting
+to it.
+
+Deliberate differences from the SQLite plan (each called out in
+`migrations/001_initial.sql`'s header):
+- Timestamps are `timestamptz`, not ISO-8601 `TEXT` — retention and the
+  board's `since_days` filter use real interval arithmetic instead of
+  relying on ISO-8601 sorting lexicographically. `core/store.py` still
+  returns them as ISO-8601 UTC strings at the API boundary, so nothing
+  downstream (export, UI) needed to change.
+- `on_hold` is a real `boolean`, not the `0`/`1` `INTEGER` SQLite used.
+- `scan.session_id` has `ON DELETE CASCADE`, so retention purge is a single
+  `DELETE FROM session` (see `scripts/purge_expired.sql`) rather than the
+  collect-ids-then-delete-both dance SQLite would have needed.
+
+Replaces the original whole-file JSON autosave (`core/autosave.py`) with an
 append/upsert-per-scan store, which is what makes multiple concurrent
 sessions safe.
+
+Original SQLite schema (superseded — see `migrations/001_initial.sql` for
+what's actually running):
 
 ```sql
 session(
@@ -117,8 +144,13 @@ rewrite (see `core/session.py` docstring and `_FULL_RECORD_KEYS`):
 - A small filter exposes the full **3-day window** (today + 2 prior days),
   so a session from yesterday or the day before is still reachable for
   export.
-- **Auto-purge:** sessions and their scans older than 3 days are deleted
-  (checked daily or on app start). No archival beyond this in v1.
+- **Auto-purge:** sessions and their scans older than 3 days are deleted.
+  Shipped as a daily GitHub Action (`.github/workflows/purge-expired.yml`,
+  running `scripts/purge_expired.sql` against Neon) rather than only
+  checking on app start — Streamlit Cloud can sit idle with nobody opening
+  it, and the sweep needs to run regardless. `core/store.purge_old_sessions()`
+  also runs the same policy in-app as a belt-and-braces backstop. No
+  archival beyond this in v1.
 - Consequence to flag to warehouse staff: **exports must happen within 3
   days** — after purge, the data is gone. The 3-day window is the only
   backup.
@@ -147,12 +179,13 @@ rewrite (see `core/session.py` docstring and `_FULL_RECORD_KEYS`):
 
 | File | Change |
 |---|---|
-| `core/autosave.py` | Replaced by **`core/store.py`**: SQLite schema above, session create/end/force-end, scan insert-or-increment, purge job. This is the foundation everything else depends on — build and verify it first. |
-| `core/session.py` | Scan record/dedupe/stats logic reads and writes the store, scoped by `session_id`. Dedupe changes from "drop" to "upsert scan_count". Timestamps become full ISO datetimes. |
-| `app.py` | Splits into two pages: **handheld scan page** (start form → scan loop, stacked mobile layout) and **monitor board page** (session list, drill-in, per-session export, force-end control). |
-| `core/export.py` | Add `session_id`, `sanford_id`, `location`, `Scan Count` columns; dynamic filename instead of the `EXPORT_FILENAME` constant. |
-| `pages/admin.py` | Optionally hosts the force-end control, reusing the existing audit-log pattern. |
-| Unchanged | `engine/`, `api/`, `data/` (lookup engine, AccessGUDID client, Fabric contract-line loader) — none of this is affected by the session/store rewrite. |
+| `core/autosave.py` | Replaced by **`core/store.py`**: Postgres (Neon) schema (`migrations/001_initial.sql`), session create/end/force-end, scan insert-or-increment, purge job. This was the foundation everything else depended on — built and verified first, as planned. |
+| `core/session.py` | Scan record/dedupe/stats logic reads and writes the store, scoped by `session_id`. Dedupe changed from "drop" to "upsert scan_count". Timestamps are full ISO datetimes. |
+| `app.py` | Split into two pages as planned: **handheld scan page** (start form → scan loop, stacked mobile layout, this file) and **monitor board page** (`pages/board.py`: session list, drill-in, per-session export, force-end control). |
+| `core/export.py` | Added `session_id`, `sanford_id`, `location`, `Scan Count` columns; dynamic filename instead of the old `EXPORT_FILENAME` constant. |
+| `pages/admin.py` | Hosts the force-end control alongside the existing Fabric refresh + audit log. |
+| `migrations/`, `scripts/`, `.github/workflows/purge-expired.yml` | Not in the original plan: schema-as-a-migration-file plus a scheduled retention sweep, needed once the store moved to a hosted DB outside the app process. |
+| Unchanged | `engine/`, `api/`, `data/` (lookup engine, AccessGUDID client, Fabric contract-line loader) — none of this was affected by the session/store rewrite. |
 
 ## Explicitly deferred (deliberate, not forgotten)
 
@@ -168,7 +201,7 @@ rewrite (see `core/session.py` docstring and `_FULL_RECORD_KEYS`):
 4. **Retention beyond 3 days / real archival.** Purge-after-3-days is the
    v1 policy; a longer-term archive (e.g. into Fabric) is a future decision.
 
-## Suggested build order
+## Build order (as shipped)
 
 1. `core/store.py` — schema, session lifecycle functions, scan
    insert-or-increment, purge job. Testable standalone with no UI.
@@ -176,4 +209,8 @@ rewrite (see `core/session.py` docstring and `_FULL_RECORD_KEYS`):
 3. Handheld scan page (start form + scan loop) against the new store.
 4. Monitor board page (session list + drill-in + export + force-end).
 5. `core/export.py` column/filename changes.
-6. End-to-end test in the actual warehouse with a real TC52x/HC50 on Wi-Fi.
+6. SQLite → Postgres (Neon) port: `migrations/001_initial.sql`,
+   `core/store.py` rewritten against `psycopg`, `scripts/purge_expired.sql` +
+   the daily GitHub Action, since Streamlit Cloud's ephemeral local disk
+   made SQLite unsuitable for the actual deploy target.
+7. End-to-end test in the actual warehouse with a real TC52x/HC50 on Wi-Fi.

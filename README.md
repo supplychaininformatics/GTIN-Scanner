@@ -17,7 +17,7 @@ gtin-scanner/
 │   └── components.py         # header, kpi tiles, result card, pills, tables
 ├── core/
 │   ├── lookup.py             # Scan orchestration (GS1 parse → cache → API)
-│   ├── store.py              # SQLite session/scan store (WAL mode) — session & scan persistence
+│   ├── store.py              # Postgres (Neon) session/scan store — session & scan persistence
 │   ├── session.py            # Session state + scan history model, backed by core/store.py
 │   ├── export.py             # Excel writer (per-session, dynamic filename)
 │   └── admin.py               # Admin auth check + cache-refresh orchestration
@@ -29,9 +29,15 @@ gtin-scanner/
 │   └── goodid_client.py      # Sync httpx fallback client
 ├── assets/
 │   └── sanford-logo.png      # Official mark — referenced, never redrawn
+├── migrations/
+│   └── 001_initial.sql       # Neon Postgres schema for session/scan (run once, idempotent)
+├── scripts/
+│   └── purge_expired.sql     # Retention sweep, run by the daily GitHub Action below
+├── .github/workflows/
+│   └── purge-expired.yml     # Daily cron: purges sessions/scans past the retention window
 ├── .streamlit/
 │   ├── config.toml           # Theme and server config
-│   └── secrets.toml.example  # Template for the admin email allowlist
+│   └── secrets.toml.example  # Template for the Neon connection string + admin email allowlist
 ├── .env.example              # Environment variable template
 └── pyproject.toml            # Project metadata and dependencies
 ```
@@ -40,8 +46,9 @@ gtin-scanner/
 independent of the UI. `core/` orchestrates them; `ui/` draws the result. No
 colour is hardcoded outside `ui/theme.py`.
 
-Two picker/supervisor-facing surfaces, both backed by the same SQLite store
-(`core/store.py`, WAL mode — see `PLAN.md` for the full design):
+Two picker/supervisor-facing surfaces, both backed by the same Neon Postgres
+store (`core/store.py` — see `PLAN.md` for the full design, and "Setting Up
+the Database" below for connecting it):
 
 - **`app.py`** (default page) — the handheld: a picker scans their Sanford ID
   (badge or typed) and enters a location to start a session, then scans
@@ -58,7 +65,11 @@ Two picker/supervisor-facing surfaces, both backed by the same SQLite store
 
 Sessions and scans older than 3 days are purged automatically — export
 before then, since the 3-day window is the only backup (no offline queue,
-no archival beyond it in v1; see `PLAN.md` → "Retention").
+no archival beyond it in v1; see `PLAN.md` → "Retention"). The authoritative
+sweep is a daily GitHub Action (`.github/workflows/purge-expired.yml`,
+running `scripts/purge_expired.sql` against Neon) so it fires even when
+nobody has the app open; `core/store.purge_old_sessions()` runs the same
+policy in-app as a belt-and-braces backstop.
 
 **Data flow per scan:**
 
@@ -81,6 +92,12 @@ Barcode Scanner (keyboard emulator)
 
 - Python 3.11 or higher
 - macOS / Linux (Windows works but activate the venv differently)
+- A Postgres database for session/scan storage — a [Neon](https://neon.tech)
+  project is what this app is built and deployed against. This is required
+  even for local development with mock catalog data: `DATA_SOURCE` only
+  switches the product-catalog source (mock vs. Fabric); sessions and scans
+  always persist through `core/store.py` to Postgres. See "Setting Up the
+  Database" below.
 
 ---
 
@@ -105,7 +122,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-> This installs everything listed in `pyproject.toml` (`streamlit`, `pandas`, `python-dotenv`, `httpx`).
+> This installs everything listed in `pyproject.toml` (`streamlit`, `pandas`, `psycopg[binary,pool]`, `python-dotenv`, `httpx`, `pyarrow`, `openpyxl`, `Pillow`).
 
 ### 4. Configure environment variables
 
@@ -113,7 +130,36 @@ pip install -e .
 cp .env.example .env
 ```
 
-Open `.env` and fill in values as needed. For local development the defaults work out of the box — `DATA_SOURCE=mock` is active and no database access is required.
+Open `.env` and fill in values as needed. `DATA_SOURCE=mock` is active by
+default, so no Fabric/Azure setup is needed for local development — but
+session and scan storage always goes through Postgres regardless of
+`DATA_SOURCE`. Set that up next.
+
+### 5. Set up the database (Neon Postgres)
+
+Sessions and scans persist to Postgres (`core/store.py`) — this step is not
+optional, including for local dev against mock catalog data.
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+```
+
+1. Create a free [Neon](https://neon.tech) project (or point at any Postgres
+   instance).
+2. Copy the **pooled** connection string (the host with `-pooler` in it —
+   every Streamlit rerun opens a connection, so pooling matters even for
+   local dev) into `.streamlit/secrets.toml` under `[neon].url`. This file is
+   git-ignored, unlike `.env`, so it's the right place for a credential.
+   Alternatively, set `NEON_DATABASE_URL` (or `DATABASE_URL`) in the
+   environment — it takes precedence over `secrets.toml` if both are set.
+3. Apply the schema once (idempotent — safe to re-run):
+
+   ```bash
+   psql "$NEON_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/001_initial.sql
+   ```
+
+Without a valid connection string, `core/store.py` raises on first use — the
+app fails fast rather than silently losing scans.
 
 ---
 
@@ -253,8 +299,13 @@ wouldn't need to change.
 
 ### 1. Fill in `.streamlit/secrets.toml`
 
+This is the same file created in Setup step 5 for the Neon connection string
+— don't re-run the `cp` from that step here, it would overwrite the `[neon]`
+URL you already filled in. Just add the `[admin]` block to the existing file
+(or create it from the template if you skipped that step):
+
 ```bash
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+[ -f .streamlit/secrets.toml ] || cp .streamlit/secrets.toml.example .streamlit/secrets.toml
 ```
 
 List who's allowed to refresh:
@@ -307,7 +358,7 @@ No `.env` changes are needed for the goodID integration. It works out of the box
 | No auth on goodID API | The FDA AccessGUDID is a fully public API — no token, no OAuth, no rate limiting for typical use. |
 | GTIN stored as `str`, no normalisation | Leading zeros are preserved exactly as scanned. No `lstrip("0")` or zero-padding — the GTIN in the DB and the scanner output must match as-is. |
 | `@st.cache_data(ttl=86400)` | The lakehouse is hit at most once per day — which also means the Azure AD sign-in prompt appears at most once per day. The mock loader uses the same decorator so switching data sources requires zero refactoring. |
-| Session history in `st.session_state` | History persists for the browser session lifetime and resets on page refresh — matching the expected workflow of a warehouse scanning station. |
+| Sessions persisted to Postgres, not just `st.session_state` | The DB row is the durable copy; `st.session_state` is a cache rebuilt from it. A `?sid=` query param lets `app.py` call `resume_session()` and rehydrate scan history after a page refresh or the handheld browser being killed and reopened — matching a warehouse floor where a device can lose its tab mid-shift. |
 
 ---
 
@@ -317,9 +368,13 @@ No `.env` changes are needed for the goodID integration. It works out of the box
 |---|---|---|
 | `streamlit` | ≥ 1.32 | Web UI framework |
 | `pandas` | ≥ 2.0 | DataFrame for cached contract line data |
+| `psycopg[binary,pool]` | ≥ 3.1 | Postgres driver + connection pool for the Neon-backed session/scan store (`core/store.py`). `binary` ships a prebuilt libpq, so no system Postgres install is needed. |
 | `python-dotenv` | ≥ 1.0 | `.env` file loading |
 | `httpx` | ≥ 0.27 | Synchronous HTTP client for goodID API |
-| `pyodbc` | ≥ 5.1 | *(optional, production only)* Fabric Lakehouse connection. Also needs the Microsoft ODBC driver installed at system level. |
+| `pyarrow` | ≥ 15.0 | Parquet read/write for the 24h contract-data cache (`data/cache/contract_lines.parquet`) |
+| `openpyxl` | ≥ 3.1 | Excel engine for per-session export (`core/export.py`) |
+| `Pillow` | ≥ 10.0 | Logo image processing (`ui/components.py`) |
+| `pyodbc` | ≥ 5.1 | *(optional, production only, `pip install -e ".[fabric]"`)* Fabric Lakehouse connection. Also needs the Microsoft ODBC driver installed at system level. |
 
 ---
 
