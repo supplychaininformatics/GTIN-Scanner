@@ -619,6 +619,37 @@ html:has(.sf-header.is-identity-only) {
     margin: 0 0 .75rem;
 }
 
+/* Miss reason (see C.miss_note_html). Explanatory, not a verdict — so it is
+   deliberately quieter than the status pill sitting directly above it: no
+   fill, a hairline rule instead of a border, and muted body text. The one
+   exception is bad_gtin, which is the only bucket the person holding the
+   scanner can act on immediately (rescan it), so it alone gets the amber
+   accent that means "your input, not our data". */
+.sf-miss {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: .3rem .5rem;
+    margin: .7rem 0 0;
+    padding: .5rem .7rem;
+    border-left: 3px solid var(--sf-hairline);
+    background: var(--sf-canvas);
+    border-radius: 0 6px 6px 0;
+    font-size: .8125rem; line-height: 1.4;
+}
+.sf-miss.is-bad_gtin { border-left-color: var(--sf-amber); }
+.sf-miss-glyph { color: var(--sf-muted); font-size: .875rem; }
+.sf-miss-label { font-weight: 700; color: var(--sf-ink); }
+.sf-miss-detail {
+    color: var(--sf-muted);
+    font-family: var(--sf-mono); font-size: .75rem;
+    /* The packaging bucket's detail carries a full sibling GTIN; letting it
+       wrap beats truncating the one number the line exists to show. */
+    overflow-wrap: anywhere;
+}
+
+/* Miss reason standing in for empty Item/Description cells in the history
+   tables. Italic + muted so a scanned row and an explanation of why a row is
+   empty never look like the same kind of value at a glance. */
+.sf-miss-inline { color: var(--sf-muted); font-style: italic; }
+
 .sf-hero-top {
     display: flex; align-items: center; gap: .75rem;
 }

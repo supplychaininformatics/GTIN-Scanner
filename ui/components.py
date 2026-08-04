@@ -19,6 +19,14 @@ from pathlib import Path
 
 import streamlit as st
 
+from engine.lookup import (
+    MISS_BAD_GTIN,
+    MISS_OFF_CONTRACT,
+    MISS_PACKAGING,
+    MISS_PADDING,
+    MISS_UNKNOWN_ITEM,
+)
+
 from .theme import SESSION_STATUS, STATUS
 
 APP_TITLE = "Warehouse GTIN Scanner"
@@ -212,6 +220,73 @@ def progress_bar_html() -> str:
     return '<div class="sf-progress"></div>'
 
 
+# ── Miss reason ───────────────────────────────────────────────────────────────
+# Short glyph per miss bucket (engine.lookup.MISS_*). Deliberately not the
+# status icons: a miss reason explains a result, it is not a result of its own,
+# and reusing ✅/❌ here would read as a second, competing verdict.
+_MISS_GLYPHS = {
+    MISS_BAD_GTIN: "⟳",
+    MISS_PADDING: "↔",
+    MISS_PACKAGING: "▤",
+    MISS_UNKNOWN_ITEM: "◍",
+    MISS_OFF_CONTRACT: "○",
+}
+
+
+def _miss_cell(entry: dict, text: str, cls: str) -> str:
+    """A history cell that falls back to the miss reason when `text` is blank.
+
+    Item and Description are empty on every unmatched scan, so both tables
+    have a run of em-dashes exactly where the reason for the miss is most
+    useful. Filling that space costs no column width — which is what makes
+    this viable on the handheld, where there is none to spare.
+
+    Styled `sf-miss-inline` so it never reads as item data: the row's own
+    status pill remains the verdict.
+    """
+    if text:
+        return (
+            f'<td class="{cls}" title="{html.escape(text)}" '
+            f'data-sf-copy="{html.escape(text)}">{html.escape(text)}</td>'
+        )
+    fallback = str(entry.get("Miss Reason") or "").strip()
+    if not fallback:
+        return f'<td class="{cls} sf-dim">{_EM_DASH}</td>'
+    return (
+        f'<td class="{cls} sf-miss-inline" title="{html.escape(fallback)}">'
+        f"{html.escape(fallback)}</td>"
+    )
+
+
+def miss_note_html(reason: str | None, label: str | None, detail: str | None) -> str:
+    """One explanatory line for a scan that did not match a contract line.
+
+    Empty string when `reason` is falsy, which is every contract hit — the
+    note only ever appears on a miss, so a normal scan is visually unchanged.
+
+    This is advisory text, never a verdict: the PACKAGING bucket in particular
+    reports a *sibling* GTIN that is on contract, and a case is not an each
+    (see engine/gtin.py). The scanned GTIN and status shown above it stay
+    exactly what was scanned and resolved, so nothing here can be mistaken for
+    a match the app did not actually make.
+    """
+    if not reason:
+        return ""
+    glyph = _MISS_GLYPHS.get(reason, "•")
+    text = (label or "").strip() or reason
+    body = (detail or "").strip()
+    detail_html = (
+        f'<span class="sf-miss-detail">{html.escape(body)}</span>' if body else ""
+    )
+    return (
+        f'<div class="sf-miss is-{html.escape(reason)}">'
+        f'<span class="sf-miss-glyph" aria-hidden="true">{glyph}</span>'
+        f'<span class="sf-miss-label">{html.escape(text)}</span>'
+        f"{detail_html}"
+        "</div>"
+    )
+
+
 # ── Hero result card ──────────────────────────────────────────────────────────
 def _val(value: object) -> str:
     text = "" if value is None else str(value).strip()
@@ -234,6 +309,8 @@ def scan_result_card_html(result: dict, full_record: dict) -> str:
     is_duplicate = bool(result.get("duplicate"))
     cls = f'{meta["cls"]} is-duplicate' if is_duplicate else meta["cls"]
     banner = '<div class="sf-hero-dup">Item already scanned</div>' if is_duplicate else ""
+    miss = miss_note_html(result.get("miss_reason"), result.get("miss_label"),
+                          result.get("miss_detail"))
 
     rows = []
     for label, mono in _FULL_RECORD_FIELDS:
@@ -258,6 +335,7 @@ def scan_result_card_html(result: dict, full_record: dict) -> str:
       <span class="sf-hero-gtin" data-sf-copy="{gtin}" title="Click to copy">{gtin}</span>
     </span>
   </div>
+  {miss}
   <div class="sf-table-scroll sf-hero-record">
     <table class="sf-table sf-kv">
       <colgroup><col class="sf-c-key"><col class="sf-c-val"></colgroup>
@@ -295,13 +373,21 @@ def history_table_html(history: list[dict]) -> str:
         gtin = str(entry.get("GTIN") or entry.get("gtin") or "").strip()
         scan = str(entry.get("Scan") or "").strip()
 
+        # On a miss these two carry the reason and its evidence instead of the
+        # em-dashes they would otherwise show — see _miss_cell.
         if desc:
             desc_cell = (
                 f'<td class="sf-wrap" title="{html.escape(desc)}" '
                 f'data-sf-copy="{html.escape(desc)}">{html.escape(desc)}</td>'
             )
         else:
-            desc_cell = f'<td class="sf-wrap sf-dim">{_EM_DASH}</td>'
+            detail = str(entry.get("Miss Detail") or "").strip()
+            desc_cell = (
+                f'<td class="sf-wrap sf-miss-inline" title="{html.escape(detail)}" '
+                f'data-sf-copy="{html.escape(detail)}">{html.escape(detail)}</td>'
+                if detail
+                else f'<td class="sf-wrap sf-dim">{_EM_DASH}</td>'
+            )
 
         # A GTIN that breaks across two lines is a misread waiting to happen.
         gtin_cell = (
@@ -334,7 +420,7 @@ def history_table_html(history: list[dict]) -> str:
             f"<td>{status_pill_html(key)}</td>"
             f"{scan_cell}"
             f"{gtin_cell}"
-            f'<td class="sf-mono sf-wrap">{_val(entry.get("Item"))}</td>'
+            f'{_miss_cell(entry, str(entry.get("Item") or "").strip(), "sf-mono sf-wrap")}'
             f"{desc_cell}"
             f"{count_cell}"
             f"</tr>"
@@ -387,7 +473,7 @@ def handheld_history_table_html(history: list[dict]) -> str:
             f'<td class="sf-mono sf-dim sf-nowrap">{_val(time_str)}</td>'
             f"<td>{status_pill_html(key)}</td>"
             f"{scan_cell}"
-            f'<td class="sf-mono sf-wrap">{_val(entry.get("Item"))}</td>'
+            f'{_miss_cell(entry, str(entry.get("Item") or "").strip(), "sf-mono sf-wrap")}'
             f"</tr>"
         )
 
