@@ -295,23 +295,20 @@ html:has(.sf-header.is-identity-only) {
     .sf-kpi-grid {
         display: contents;
     }
-    /* The End Session button (below) is position:fixed to the bottom-right
-       corner, floating outside document flow — on a phone-width column the
-       last card (the empty-state "Ready to scan" box) is exactly as wide as
-       the viewport, so without reserved space its bottom-right corner sits
-       right under the button. Pad the container by the button's own
-       footprint (34px height + 1.25rem offset + margin) so content always
-       clears it. */
-    .block-container { padding-bottom: 4.5rem !important; }
+    /* The End Session button now sits in normal document flow at the end of
+       the column (see .st-key-sf_endsession), so no space has to be reserved
+       for a floating button any more — just enough to keep the last element
+       off the bottom edge of the screen. */
+    .block-container { padding-bottom: 1.5rem !important; }
 }
 
 /* ── Cross-page nav (Monitor Board ⇄ Admin only — see PLAN.md: the handheld
    is a picker-only surface and deliberately carries no link to either) ────
    A real st.page_link, not markup, so it drives Streamlit's own router.
-   Pinned into the fixed header's right side using the same trick as
-   .st-key-sf_endsession below: Streamlit wraps the keyed container in a
-   layout wrapper that carries the surface background, so that wrapper (not
-   just the keyed node) has to be pinned and stripped too. */
+   Pinned into the fixed header's right side: Streamlit wraps the keyed
+   container in a layout wrapper that carries the surface background, so that
+   wrapper (not just the keyed node) has to be pinned and stripped too — the
+   same stripping .st-key-sf_endsession below needs. */
 [data-testid="stLayoutWrapper"]:has(.st-key-sf_navlink),
 [data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-sf_navlink),
 .st-key-sf_navlink {
@@ -465,34 +462,37 @@ html:has(.sf-header.is-identity-only) {
     box-shadow: 0 0 0 4px var(--sf-focus-ring) !important;
 }
 
-/* End Session button (handheld only, app.py) — pinned to the bottom-RIGHT
-   corner of the viewport (not the document flow, so scrolling the history
-   table never moves it). A single button now that the handheld carries no
-   Admin link of its own (see PLAN.md — Admin/force-end is a supervisor
-   surface, reached from the monitor board, not from a picker's device).
+/* End Session button (handheld only, app.py) — pinned to the bottom of the
+   page's single column — the last thing in normal document flow, below the
+   history table. It used to be position:fixed to the viewport, which meant it
+   floated on top of whatever the picker had scrolled to (in practice, the
+   history table it was overlapping). In flow it can't collide with anything.
+   A single button now that the handheld carries no Admin link of its own
+   (see PLAN.md — Admin/force-end is a supervisor surface, reached from the
+   monitor board, not from a picker's device).
 
    Streamlit wraps the keyed container in a full-width layout wrapper that
-   carries the surface background — that wrapper is the white box. Pin it to
-   the corner and strip every surface/box/padding from it AND the keyed
-   block, so only the blue button shows. The wrapper is targeted three ways
-   (:has on the parent, the parent-of-parent, and the keyed node itself) so
-   the fix holds regardless of exactly which node Streamlit puts the class on. */
+   carries the surface background — that wrapper is the white box, so strip
+   every surface/box/padding from it AND the keyed block, leaving only the
+   blue button. The wrapper is targeted three ways (:has on the parent, the
+   parent-of-parent, and the keyed node itself) so the fix holds regardless
+   of exactly which node Streamlit puts the class on. */
 [data-testid="stLayoutWrapper"]:has(.st-key-sf_endsession),
 [data-testid="stVerticalBlockBorderWrapper"]:has(.st-key-sf_endsession),
 .st-key-sf_endsession {
-    position: fixed !important;
-    bottom: 1.25rem;
-    right: 1.5rem;
-    left: auto !important;
-    width: 160px !important;
-    max-width: none !important;
-    z-index: 999980;
     background: transparent !important;
     background-color: transparent !important;
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
-    margin: 0 !important;
+}
+/* Sized to the button and centred on the same axis as the 640px stage column
+   above it, with room above so it reads as its own end-of-page action rather
+   than part of the history table. */
+.st-key-sf_endsession {
+    width: 132px !important;
+    max-width: 132px !important;
+    margin: 1.75rem auto .5rem !important;
 }
 .st-key-sf_endsession [data-testid="stVerticalBlock"],
 .st-key-sf_endsession [data-testid="stElementContainer"] {
@@ -508,15 +508,15 @@ html:has(.sf-header.is-identity-only) {
     color: var(--sf-surface) !important;
     border: 1px solid var(--sf-blue) !important;
     border-radius: 6px !important;
-    height: 34px !important;
-    padding: 0 .75rem !important;
+    height: 30px !important;
+    padding: 0 .6rem !important;
     box-sizing: border-box !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     white-space: nowrap !important;
     font-weight: 600 !important;
-    font-size: .8125rem !important;
+    font-size: .75rem !important;
     letter-spacing: .03em;
     text-decoration: none !important;
     transition: background 160ms ease-out, border-color 160ms ease-out;

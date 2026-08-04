@@ -202,10 +202,6 @@ def _confirm_end_session() -> None:
             st.rerun()
 
 
-with st.container(key="sf_endsession"):
-    if st.button("End Session", key="sf_end_session_btn", use_container_width=True):
-        _confirm_end_session()
-
 # The slot lives above the workspace but is filled after the scan resolves, so
 # the in-flight bar appears directly under the header where it belongs.
 progress_slot = st.empty()
@@ -316,6 +312,17 @@ with st.container(key="sf_stage"):
         # Absorbs the remaining viewport height and scrolls internally.
         with st.container(key="sf_hist"):
             st.markdown(C.handheld_history_table_html(history), unsafe_allow_html=True)
+
+# ── End Session ───────────────────────────────────────────────────────────────
+# Last element on the page, in normal document flow below the history table —
+# it used to float pinned to the viewport, which left it sitting on top of
+# whatever the picker had scrolled to (usually the history table). Ending the
+# session is also the last thing done in a shift, so the bottom of the column
+# is where it belongs; it is deliberately below the scan lane so a destructive
+# action never sits above the control the picker uses all day.
+with st.container(key="sf_endsession"):
+    if st.button("End Session", key="sf_end_session_btn", use_container_width=True):
+        _confirm_end_session()
 
 # ── Client runtime: autofocus, alert tones, Esc, clock, copy, count-up ────────
 scanner_runtime(
