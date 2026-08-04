@@ -1,16 +1,16 @@
 # Graph Report - gtin-scanner  (2026-08-04)
 
 ## Corpus Check
-- 29 files · ~29,544 words
+- 29 files · ~29,623 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 295 nodes · 466 edges · 11 communities (9 shown, 2 thin omitted)
+- 295 nodes · 467 edges · 11 communities (9 shown, 2 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 1 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `926cc8f6`
+- Built from commit: `041b5a93`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -101,11 +101,11 @@ Nodes (29): check_digit(), check_digit_valid(), core(), describe_indicator(), in
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `LookupEngine` connect `LookupEngine` to `core/admin.py`?**
-  _High betweenness centrality (0.104) - this node is a cross-community bridge._
+  _High betweenness centrality (0.103) - this node is a cross-community bridge._
 - **Why does `get_lookup_engine()` connect `core/admin.py` to `LookupEngine`, `app.py`, `loader.py`?**
-  _High betweenness centrality (0.050) - this node is a cross-community bridge._
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._
 - **Why does `load_contract_data()` connect `loader.py` to `core/admin.py`?**
-  _High betweenness centrality (0.034) - this node is a cross-community bridge._
+  _High betweenness centrality (0.037) - this node is a cross-community bridge._
 - **What connects `gtin-scanner`, `graphify`, `1. `manuf_name` → "Brand" mapping is a guess` to the rest of the system?**
   _37 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `core/admin.py` be split into smaller, more focused modules?**

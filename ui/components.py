@@ -19,6 +19,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from core.lookup import STATUS_API
 from engine.lookup import (
     MISS_BAD_GTIN,
     MISS_OFF_CONTRACT,
@@ -309,8 +310,13 @@ def scan_result_card_html(result: dict, full_record: dict) -> str:
     is_duplicate = bool(result.get("duplicate"))
     cls = f'{meta["cls"]} is-duplicate' if is_duplicate else meta["cls"]
     banner = '<div class="sf-hero-dup">Item already scanned</div>' if is_duplicate else ""
-    miss = miss_note_html(result.get("miss_reason"), result.get("miss_label"),
-                          result.get("miss_detail"))
+    # Suppress the miss note on an API-found result: it's the diagnosis for why
+    # the LOCAL cache missed, but shown next to "API Found" it reads as a
+    # contradiction ("found" + "item not on contract"). Still recorded on the
+    # result dict for the store/Excel export — this only hides the UI banner.
+    miss = "" if key == STATUS_API else miss_note_html(
+        result.get("miss_reason"), result.get("miss_label"), result.get("miss_detail")
+    )
 
     rows = []
     for label, mono in _FULL_RECORD_FIELDS:

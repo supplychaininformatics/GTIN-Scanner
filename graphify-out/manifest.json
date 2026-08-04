@@ -105,13 +105,13 @@
     "semantic_hash": ""
   },
   "ui/components.py": {
-    "mtime": 1785868862.5733604,
-    "ast_hash": "c296f283f8461f4e33ae4bdf4eac1f23",
+    "mtime": 1785870281.095586,
+    "ast_hash": "2b7e57c988922887275a6be853a26b59",
     "semantic_hash": ""
   },
   "ui/theme.py": {
-    "mtime": 1785868862.5736032,
-    "ast_hash": "7f29f167cff74ae28c2bbd787a3661cc",
+    "mtime": 1785870414.7705219,
+    "ast_hash": "f878afcb7065427dd9c001b7fb4ef8cc",
     "semantic_hash": ""
   },
   ".github/workflows/purge-expired.yml": {

@@ -651,17 +651,21 @@ html:has(.sf-header.is-identity-only) {
 .sf-miss-inline { color: var(--sf-muted); font-style: italic; }
 
 .sf-hero-top {
-    display: flex; align-items: center; gap: .75rem;
+    display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
 }
-.sf-hero-gtin-wrap { display: flex; align-items: baseline; gap: .4rem; }
+.sf-hero-gtin-wrap {
+    display: flex; align-items: baseline; gap: .4rem; flex-wrap: wrap;
+    min-width: 0;
+}
 .sf-hero-gtin-label {
     font-size: .6875rem; text-transform: uppercase; letter-spacing: .08em;
     font-weight: 700; color: var(--sf-muted);
 }
 .sf-hero-gtin {
     font-family: var(--sf-mono); font-variant-numeric: tabular-nums;
-    font-size: 1.25rem; font-weight: 700; color: var(--sf-blue);
+    font-size: 1rem; font-weight: 700; color: var(--sf-blue);
     letter-spacing: .04em;
+    overflow-wrap: anywhere; word-break: break-all; min-width: 0;
 }
 .sf-empty {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
