@@ -70,7 +70,13 @@ def _root_vars() -> str:
     --sf-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
     /* Metrics */
-    --sf-header-h: {HEADER_HEIGHT_PX}px;
+    /* The dark-blue identity bar. Identical on every page and every width —
+       a banner that changes height between the start gate and the scan page
+       reads as two different apps. */
+    --sf-identity-h: {HEADER_HEIGHT_PX}px;
+    /* The whole fixed header: the identity bar, plus the chip band that sits
+       under it at phone width. Only the content offset uses this. */
+    --sf-header-h: var(--sf-identity-h);
 
     /* Derived tokens — never new colours, always mixes of the approved ones. */
     --sf-muted:        color-mix(in srgb, var(--sf-ink) 55%, var(--sf-gray));
@@ -78,6 +84,12 @@ def _root_vars() -> str:
     --sf-zebra:        color-mix(in srgb, var(--sf-canvas) 70%, var(--sf-surface));
     --sf-hover:        color-mix(in srgb, var(--sf-light-blue) 12%, var(--sf-surface));
     --sf-focus-ring:   color-mix(in srgb, var(--sf-light-blue) 45%, transparent);
+
+    /* The session/KPI chip panel. PMS 284 at full strength is a hard edge to
+       read a row of numbers off, so the band is a pale wash of it and the
+       chips are set in PMS 541 rather than white-on-blue. */
+    --sf-chip-band:    color-mix(in srgb, var(--sf-light-blue) 42%, var(--sf-surface));
+    --sf-chip-label:   color-mix(in srgb, var(--sf-blue) 82%, var(--sf-chip-band));
 
     --sf-success-tint: color-mix(in srgb, var(--sf-success) 10%, var(--sf-surface));
     --sf-lightblue-tint: color-mix(in srgb, var(--sf-light-blue) 16%, var(--sf-surface));
@@ -129,14 +141,28 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 /* ── Fixed header ───────────────────────────────────────────────────────── */
 .sf-header {
     position: fixed; top: 0; left: 0; right: 0;
-    height: var(--sf-header-h);
+    height: var(--sf-identity-h);
     background: var(--sf-blue);
     z-index: 999990;
     display: flex; align-items: center; justify-content: space-between;
     padding: 0 2rem;
     box-shadow: 0 2px 12px var(--sf-shadow);
 }
-.sf-header-left { display: flex; align-items: center; gap: 1.5rem; flex-shrink: 0; }
+/* The identity block owns the blue bar's height rather than inheriting
+   whatever its content happens to measure, so the bar is the same size on the
+   start gate (identity only) as on the scan page (identity + chips). */
+.sf-header-left {
+    display: flex; align-items: center; gap: 1.5rem; flex-shrink: 0;
+    height: var(--sf-identity-h);
+}
+/* Pages with no session chips (the start gate, the monitor board, admin) show
+   the identity bar and nothing else, so the content below starts right under
+   it. !important because the client runtime parks a measured --sf-header-h in
+   the document's inline style, which would otherwise survive the rerun back
+   from an ended session onto this chip-less header. */
+html:has(.sf-header.is-identity-only) {
+    --sf-header-h: var(--sf-identity-h) !important;
+}
 /* The mark is two-tone on white and must never be recoloured — so it sits on
    its own white plate rather than being inverted onto the blue. */
 .sf-logo-plate {
@@ -192,14 +218,25 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     white-space: nowrap;
     opacity: .9;
 }
-.sf-header-right { display: flex; align-items: center; gap: 1.75rem; }
+/* Sanford Id/ Name, Warehouse Location and the four KPI counters share one
+   pale PMS 284 panel, at every width — full-height and flush to the right
+   edge of the bar here, a full-width band under it at phone width. They are
+   live session readings rather than identity, so they get their own plate
+   instead of floating on the navy next to the app title. */
+.sf-header-right {
+    display: flex; align-items: center; gap: 1.75rem;
+    align-self: stretch;
+    background: var(--sf-chip-band);
+    padding: 0 2rem;
+    margin: 0 -2rem 0 1.5rem;
+}
 .sf-chip { display: flex; flex-direction: column; gap: 2px; line-height: 1.15; }
 .sf-chip-k {
     font-size: .625rem; text-transform: uppercase; letter-spacing: .09em;
-    color: rgb(255 255 255 / .6); font-weight: 600;
+    color: var(--sf-chip-label); font-weight: 600;
 }
 .sf-chip-v {
-    font-size: .875rem; color: rgb(255 255 255 / .95); font-weight: 600;
+    font-size: .875rem; color: var(--sf-blue); font-weight: 600;
     font-family: var(--sf-mono); font-variant-numeric: tabular-nums;
 }
 /* Handheld-only KPI chips (see ui.components._kpi_chip_html), arranged as a
@@ -215,47 +252,45 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 }
 
 /* Phone-width handheld: the identity block plus a full chip row (KPIs,
-   session info) no longer fit on one line, so the header wraps across as
-   many rows as the content needs instead of clipping/overlapping. The
-   116px here is only a first-paint fallback (picked for a mid-range chip
-   count) — the client runtime's syncHeaderHeight() immediately overwrites
-   --sf-header-h with the header's real measured height, since the row
-   count varies with KPI values and Sanford Id/Location text length.
+   session info) no longer fit on one line, so the chips wrap onto their own
+   band below the identity bar. The bar itself stays exactly --sf-identity-h
+   tall — the band is extra height under it, never a stretch of the blue.
+
+   The 180px here is only a first-paint fallback for the *content offset*
+   (picked for a mid-range chip count) — the client runtime's
+   syncHeaderHeight() immediately overwrites --sf-header-h with the header's
+   real measured height, since the band's row heights vary with the
+   Sanford Id/Location text length. Chip-less pages never need it: the
+   html:has(.is-identity-only) rule above pins them to the bar's own height.
 
    All six values (Sanford Id/Name, Warehouse Location, Total, DW Hits, API
    Hits, Not Found) become one uniform 3x2 grid on a PMS 284 band, instead
    of the two wide session chips sitting apart from the 2x2 KPI grid — a
    single evenly-spread block reads better at this width than two. */
 @media (max-width: 640px) {
-    :root { --sf-header-h: 172px; }
+    :root { --sf-header-h: 180px; }
     .sf-header {
         flex-wrap: wrap;
         height: auto;
-        min-height: var(--sf-header-h);
-        padding: .6rem 1rem 0 1rem;
-        row-gap: .6rem;
+        padding: 0 1rem;
+        row-gap: 0;
     }
+    /* Same panel as above, re-laid-out: full-bleed across the header's own
+       width, below the identity bar rather than beside it. The colours are
+       inherited — only the geometry changes here. */
     .sf-header-right {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 0;
         width: calc(100% + 2rem);
-        margin: .6rem -1rem -1px -1rem;
-        background: var(--sf-light-blue);
+        padding: 0;
+        margin: 0 -1rem -1px -1rem;
     }
     .sf-header-right .sf-chip,
     .sf-kpi-grid .sf-chip {
         align-items: center;
         text-align: center;
         padding: .5rem .25rem;
-    }
-    .sf-header-right .sf-chip-k,
-    .sf-kpi-grid .sf-chip-k {
-        color: color-mix(in srgb, var(--sf-blue) 70%, transparent);
-    }
-    .sf-header-right .sf-chip-v,
-    .sf-kpi-grid .sf-chip-v {
-        color: var(--sf-blue);
     }
     .sf-kpi-grid {
         display: contents;
