@@ -361,10 +361,11 @@ def record_scan(session_id: str, result: dict) -> None:
     with _cursor() as cur:
         cur.execute(
             "INSERT INTO scan (session_id, scanned_at, last_scanned, scan_count, "
-            "gtin, raw_scan, status_key, source, on_hold, item, company, brand, "
+            "gtin, raw_scan, status_key, source, on_hold, miss_reason, "
+            "miss_detail, item, company, brand, "
             "description, gtin_uom, uou, hibcc, lawson_id, lawson_uom) "
             "VALUES (%s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s, %s)",
+            "%s, %s, %s, %s, %s)",
             (
                 session_id,
                 now,
@@ -374,6 +375,12 @@ def record_scan(session_id: str, result: dict) -> None:
                 result["status_key"],
                 result["source_label"],
                 bool(result["on_hold"]),
+                # NULL on a contract hit — see migrations/002_miss_reason.sql.
+                # .get() rather than [] so a caller building a result dict by
+                # hand (tests, the duplicate path) is not forced to carry keys
+                # that only ever describe a miss.
+                result.get("miss_reason"),
+                result.get("miss_detail"),
                 *(full_record.get(label, "") for _, label in _FULL_RECORD_COLUMNS),
             ),
         )

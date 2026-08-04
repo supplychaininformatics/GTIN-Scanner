@@ -22,6 +22,8 @@ from datetime import datetime
 
 import streamlit as st
 
+from engine.lookup import MISS_LABELS
+
 from . import store
 from .lookup import STATUS_API, STATUS_CACHE, STATUS_HOLD, STATUS_NOT_FOUND
 
@@ -96,6 +98,9 @@ def _wall_clock(iso_ts: str) -> str:
 def _row_to_entry(row: dict) -> dict:
     """Translate a store.scan row into the history-entry shape the UI and
     export expect (see module docstring)."""
+    # Stored raw so it stays aggregatable in SQL; the label is derived here,
+    # the same split `status_key` -> `status` already uses above.
+    miss_reason = row.get("miss_reason")
     entry = {
         "time": _wall_clock(row["scanned_at"]),
         "gtin": row["gtin"],
@@ -106,6 +111,9 @@ def _row_to_entry(row: dict) -> dict:
         "Scan Count": row["scan_count"],
         "Scan": row["raw_scan"] or row["gtin"],
         "GTIN": row["gtin"],
+        "miss_reason": miss_reason,
+        "Miss Reason": MISS_LABELS.get(miss_reason, "") if miss_reason else "",
+        "Miss Detail": row.get("miss_detail") or "",
     }
     for col, label in _ROW_TO_FULL_RECORD.items():
         entry[label] = row.get(col, "")
@@ -238,6 +246,12 @@ def record_duplicate_scan(raw_gtin: str, gtin: str, existing: dict) -> None:
         "status_label": existing.get("status"),
         "source_label": existing.get("source"),
         "source": None,
+        # Carried from the stored row rather than re-diagnosed: a rescan of an
+        # unmatched item is the same miss, and re-running diagnose() here would
+        # cost a lookup to reach an answer already on the row.
+        "miss_reason": existing.get("miss_reason"),
+        "miss_label": existing.get("Miss Reason", ""),
+        "miss_detail": existing.get("Miss Detail", ""),
         "duplicate": True,
         "scan_count": updated_row["scan_count"],
     }

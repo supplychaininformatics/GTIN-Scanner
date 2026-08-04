@@ -146,6 +146,12 @@ def resolve_scan(
             "record": record,
             "full_record": full_record,
             "on_hold": on_hold,
+            # A contract hit has nothing to explain. Kept as explicit None so
+            # every result dict carries the same keys and the store's INSERT
+            # does not need a per-branch shape.
+            "miss_reason": None,
+            "miss_label": None,
+            "miss_detail": None,
             # On Hold overrides Cache Hit visually, but the legacy export label
             # stays "✅ Found" exactly as before.
             "status_key": STATUS_HOLD if on_hold else STATUS_CACHE,
@@ -154,7 +160,17 @@ def resolve_scan(
         }
 
     # ── goodID API fallback ───────────────────────────────────────────────────
-    logger.info("Cache MISS for GTIN %s — querying goodID API.", gtin)
+    #
+    # Diagnose before the API call, not after. The question this answers is
+    # "why is this not on our contract?", which a goodID hit does not change —
+    # an item the API knows about but the contract file does not is exactly the
+    # evidence worth collecting, so miss_reason is recorded for API hits too,
+    # not only for outright Not Found.
+    miss = engine.diagnose(gtin)
+    logger.info(
+        "Cache MISS for GTIN %s (%s: %s) — querying goodID API.",
+        gtin, miss["reason"], miss["detail"],
+    )
     if before_api is not None:
         before_api()
     try:
@@ -221,4 +237,11 @@ def resolve_scan(
         "status_key": status_key,
         "status_label": status_label,
         "source_label": "goodID API",
+        # Stored raw (not the display label) so the column stays aggregatable
+        # in SQL — the whole point is being able to count the buckets. The
+        # human label is derived at read time, exactly as `status` is derived
+        # from `status_key` (see core/session._row_to_entry).
+        "miss_reason": miss["reason"],
+        "miss_label": miss["label"],
+        "miss_detail": miss["detail"],
     }
