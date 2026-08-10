@@ -1,5 +1,5 @@
 {
-  "0": "core/admin.py",
+  "0": "core/lookup.py",
   "1": "store.py",
   "2": "components.py",
   "3": "app.py",

@@ -1,21 +1,21 @@
-# Graph Report - gtin-scanner  (2026-08-04)
+# Graph Report - gtin-scanner  (2026-08-10)
 
 ## Corpus Check
-- 29 files · ~29,623 words
+- 29 files · ~32,921 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 295 nodes · 467 edges · 11 communities (9 shown, 2 thin omitted)
+- 304 nodes · 483 edges · 11 communities (9 shown, 2 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 1 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `041b5a93`
+- Built from commit: `2d6f8aa9`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- core/admin.py
+- core/lookup.py
 - store.py
 - components.py
 - app.py
@@ -33,11 +33,11 @@
 3. `GTIN Scanner — Handheld + Monitor Two-Surface Plan` - 13 edges
 4. `GTIN Barcode Scanner` - 11 edges
 5. `get_lookup_engine()` - 10 edges
-6. `normalize()` - 9 edges
-7. `resolve_scan()` - 8 edges
-8. `_utcnow()` - 8 edges
-9. `_row()` - 8 edges
-10. `_load_from_lakehouse()` - 8 edges
+6. `resolve_scan()` - 9 edges
+7. `_load_from_lakehouse()` - 9 edges
+8. `normalize()` - 9 edges
+9. `_utcnow()` - 8 edges
+10. `_row()` - 8 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `get_lookup_engine()` --calls--> `load_contract_data()`  [EXTRACTED]
@@ -56,9 +56,9 @@
 
 ## Communities (11 total, 2 thin omitted)
 
-### Community 0 - "core/admin.py"
+### Community 0 - "core/lookup.py"
 Cohesion: 0.07
-Nodes (38): GoodIDResult, query_goodid(), api/goodid_client.py ~~~~~~~~~~~~~~~~~~~~ HTTP fallback client for the FDA…, Structured result from an AccessGUDID API call. Attributes: success: True if…, Look up a device identifier against the FDA AccessGUDID database. Falls back…, api package — exports the goodID fallback client., cache_resource, _allowed_domains() (+30 more)
+Nodes (40): GoodIDResult, query_goodid(), api/goodid_client.py ~~~~~~~~~~~~~~~~~~~~ HTTP fallback client for the FDA…, Structured result from an AccessGUDID API call. Attributes: success: True if…, Look up a device identifier against the FDA AccessGUDID database. Falls back…, api package — exports the goodID fallback client., cache_resource, _allowed_domains() (+32 more)
 
 ### Community 1 - "store.py"
 Cohesion: 0.08
@@ -73,12 +73,12 @@ Cohesion: 0.09
 Nodes (31): _confirm_end_session(), app.py ~~~~~~ GTIN Barcode Scanner — Handheld scan page, Streamlit entry point.…, Gate on the one moment data could be lost for good: forgetting to export before…, clear_result(), compute_stats(), end_session(), find_duplicate(), history_for_session() (+23 more)
 
 ### Community 4 - "GTIN Barcode Scanner"
-Cohesion: 0.06
-Nodes (29): 1. `manuf_name` → "Brand" mapping is a guess, 2. No lakehouse column for `low_uom_code_gtin`, 3. Active-line filter (`WHERE contract_line_state = 2`) was dropped, Fabric Lakehouse Migration — Open Items, 1. Clone / open the project, 1. Fill in `.streamlit/secrets.toml`, 1. Install the Microsoft ODBC driver (system-level), 2. Create and activate a virtual environment (+21 more)
+Cohesion: 0.07
+Nodes (28): Fabric Lakehouse Migration — Open Items, Resolved, Still open, 1. Clone / open the project, 1. Fill in `.streamlit/secrets.toml`, 1. Install the Microsoft ODBC driver (system-level), 2. Create and activate a virtual environment, 2. Install the Python driver (+20 more)
 
 ### Community 5 - "loader.py"
-Cohesion: 0.12
-Nodes (24): data package — exports the public data-loading interface., _coerce_bool(), _contract_line_query(), _fabric_connection_string(), _fetch_fresh_data(), load_contract_data(), _load_from_lakehouse(), _load_mock_data_fallback() (+16 more)
+Cohesion: 0.09
+Nodes (32): data package — exports the public data-loading interface., _coerce_bool(), _contract_line_query(), _fabric_access_token(), _fabric_connection_string(), _fabric_credential(), _fetch_fresh_data(), load_contract_data() (+24 more)
 
 ### Community 6 - "board.py"
 Cohesion: 0.13
@@ -93,23 +93,23 @@ Cohesion: 0.08
 Nodes (29): check_digit(), check_digit_valid(), core(), describe_indicator(), indicator(), is_digits(), normalize(), engine/gtin.py ~~~~~~~~~~~~~~ Pure GTIN arithmetic. No pandas, no Streamlit, no… (+21 more)
 
 ## Knowledge Gaps
-- **37 isolated node(s):** `gtin-scanner`, `graphify`, `1. `manuf_name` → "Brand" mapping is a guess`, `2. No lakehouse column for `low_uom_code_gtin``, `3. Active-line filter (`WHERE contract_line_state = 2`) was dropped` (+32 more)
+- **36 isolated node(s):** `gtin-scanner`, `graphify`, `Resolved`, `Still open`, `Core model` (+31 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **2 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `LookupEngine` connect `LookupEngine` to `core/admin.py`?**
-  _High betweenness centrality (0.103) - this node is a cross-community bridge._
-- **Why does `get_lookup_engine()` connect `core/admin.py` to `LookupEngine`, `app.py`, `loader.py`?**
-  _High betweenness centrality (0.048) - this node is a cross-community bridge._
-- **Why does `load_contract_data()` connect `loader.py` to `core/admin.py`?**
-  _High betweenness centrality (0.037) - this node is a cross-community bridge._
-- **What connects `gtin-scanner`, `graphify`, `1. `manuf_name` → "Brand" mapping is a guess` to the rest of the system?**
-  _37 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `core/admin.py` be split into smaller, more focused modules?**
-  _Cohesion score 0.07293868921775898 - nodes in this community are weakly interconnected._
+- **Why does `LookupEngine` connect `LookupEngine` to `core/lookup.py`?**
+  _High betweenness centrality (0.102) - this node is a cross-community bridge._
+- **Why does `get_lookup_engine()` connect `core/lookup.py` to `LookupEngine`, `app.py`, `loader.py`?**
+  _High betweenness centrality (0.049) - this node is a cross-community bridge._
+- **Why does `load_contract_data()` connect `loader.py` to `core/lookup.py`?**
+  _High betweenness centrality (0.039) - this node is a cross-community bridge._
+- **What connects `gtin-scanner`, `graphify`, `Resolved` to the rest of the system?**
+  _36 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Should `core/lookup.py` be split into smaller, more focused modules?**
+  _Cohesion score 0.07053140096618357 - nodes in this community are weakly interconnected._
 - **Should `store.py` be split into smaller, more focused modules?**
   _Cohesion score 0.07897793263646923 - nodes in this community are weakly interconnected._
 - **Should `components.py` be split into smaller, more focused modules?**
