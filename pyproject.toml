@@ -28,8 +28,14 @@ dependencies = [
 # Needed only for DATA_SOURCE=fabric. Kept out of the core dependencies because
 # pyodbc also requires the Microsoft ODBC driver to be installed at system
 # level, which pip cannot do — see README → "Switching to the Fabric Lakehouse".
+#
+# azure-identity does the Azure AD sign-in in Python rather than delegating to
+# the ODBC driver. This is not a preference: the driver's browser-based modes
+# (ActiveDirectoryInteractive) are Windows-only, and on macOS the driver accepts
+# the value then hangs until timeout. See data/loader.py → _fabric_access_token.
 fabric = [
     "pyodbc>=5.1.0",
+    "azure-identity>=1.19.0",
 ]
 dev = [
     "pytest>=8.0.0",

@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import struct
 import time
 from pathlib import Path
 
@@ -60,70 +61,89 @@ _IDENTIFIER_RE = re.compile(rf"^{_IDENT_PART}(?:\.{_IDENT_PART}){{0,2}}$")
 # app (engine.LookupEngine, core.lookup, ui.components). Renaming right after
 # fetch means nothing downstream needs to know the source ever changed.
 #
-# NOTE — "manuf_name" -> "manufacturer_number" is a positional guess, not a
-# confirmed mapping: it fills the same slot the old Redshift column
-# `manufacturer_number` did (which core.lookup.py labels "Brand" in the UI),
-# but the lakehouse name suggests it might actually be a readable manufacturer
-# name rather than a number. Confirm against real rows before trusting the
-# "Brand" column in the UI.
+# NOTE — "manuf_item", not "manuf_name", is the counterpart of the old Redshift
+# `manufacturer_number` (which core.lookup.py labels "Brand"). Verified against
+# the retained mock dataset: manuf_item matches the old value on 100% of the
+# ~400k comparable rows. `manuf_name` is a readable *company* name
+# ("INTUITIVE SURGICAL INC") and is 1:1 with manuf_code ("INTU") — 2,103
+# distinct values each — so it feeds "Company" under its own name. The mock
+# datasets predate it and have no such column; core.lookup falls back to
+# manufacturer_code there, which is why nothing downstream requires it.
 #
-# NOTE — there is no lakehouse counterpart to the old `low_uom_code_gtin`
-# column. That column fed engine.LookupEngine's inner-pack/each-level barcode
-# alias (see engine/lookup.py) — a worker could scan either the case barcode
-# or the individual-unit barcode inside it and both resolved to the same
-# contract line. Without it, only the case-level `gtin` barcode will resolve;
-# an inner-pack scan will silently fall through to "Not Found". This is a
-# real feature gap, not just a rename, until a source column is identified.
+# NOTE — "base_uom_gtin" is the lakehouse name for the old `low_uom_code_gtin`.
+# It feeds engine.LookupEngine's inner-pack/each-level barcode alias (see
+# engine/lookup.py) so a worker can scan either the case barcode or the
+# individual-unit barcode inside it. Also verified at 100% against the mock
+# dataset. Present on 14.7% of rows; where present it differs from the
+# case-level `gtin` essentially always.
 _LAKEHOUSE_COLUMN_MAP = {
     "item": "item_number",
     "contract_uom": "uom_unit_of_measure",
     "gtin": "global_trade_item_number",
+    "base_uom_gtin": "low_uom_code_gtin",
     "description": "item_description",
     "description2": "item_description2",
     "description_long": "item_description3",
-    "item_type": "item_type_state",
     "base_uom": "low_uom_code_unit_of_measure",
     "manuf_code": "manufacturer_code",
-    "manuf_name": "manufacturer_number",
-    "multi_use_qty": "san_multi_use_qty",
+    "manuf_name": "manufacturer_name",
+    "manuf_item": "manufacturer_number",
     "line": "contract_line",
     "hold": "on_hold",
 }
 
-# NOTE — the old Redshift query filtered `WHERE contract_line_state = 2`
-# (active lines only). This table has no equivalent column, so this query is
-# currently unfiltered — it will return every contract line, including any
-# inactive/historical/discontinued ones the old filter excluded. Confirm
-# whether that's intended, or whether an active-only filter needs to be added
-# once the right column is known.
+# The `active` bit is the lakehouse equivalent of the old Redshift filter
+# `WHERE contract_line_state = 2`. Filtering here rather than downstream keeps
+# the behaviour identical to the pre-migration app: an inactive line does not
+# resolve at all, so a scan of a discontinued item reports "Not Found".
+# Excludes ~18.6k of 176.3k lines (10.6%).
 _SQL_TEMPLATE = """
 SELECT
     item,
     vendor_item,
     implantable,
-    base_cost,
     contract_uom,
     gtin,
+    base_uom_gtin,
     description,
     description2,
     description_long,
-    item_type,
     base_uom,
     manuf_code,
     manuf_name,
-    multi_use_qty,
+    manuf_item,
     contract,
     line,
     hold
 FROM {table}
+WHERE active = 1
 """
+
+# Columns the lakehouse has that this app deliberately does NOT select, and
+# strips if an older local dataset still carries them (see _RETIRED_COLUMNS use
+# in _load_mock_from_excel):
+#
+#   base_cost         — unit pricing. Never displayed (core.lookup builds
+#                       full_record from a fixed field list), never exported
+#                       (core.export._COLUMNS), never persisted. Not selecting
+#                       it is what keeps contract pricing out of process memory,
+#                       out of the on-disk Parquet cache, and out of any future
+#                       Neon copy of this table.
+#   san_multi_use_qty — unused, and 82 distinct values across the whole table.
+#   item_type_state   — unused, and effectively constant ("Itemmast").
+#
+# base_cost and san_multi_use_qty arrive from ODBC as Decimal objects, so
+# together they were ~40MB of an 88.8MB DataFrame — about half of it, for data
+# nothing reads. Dropping all three halves resident memory.
+_RETIRED_COLUMNS = ("base_cost", "san_multi_use_qty", "item_type_state")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PRODUCTION FABRIC LAKEHOUSE BLOCK
 # Requires FABRIC_SQL_ENDPOINT + FABRIC_DATABASE in .env, DATA_SOURCE=fabric,
-# the `fabric` extra installed (pyodbc), and the Microsoft ODBC driver
-# installed at system level. See README → "Switching to the Fabric Lakehouse".
+# the `fabric` extra installed (pyodbc + azure-identity), and the Microsoft ODBC
+# driver installed at system level. See README → "Switching to the Fabric
+# Lakehouse".
 # ─────────────────────────────────────────────────────────────────────────────
 def _contract_line_query() -> str:
     """Build the contract line query against the configured lakehouse table."""
@@ -139,31 +159,196 @@ def _contract_line_query() -> str:
 def _fabric_connection_string() -> str:
     """Assemble the ODBC connection string for the Fabric SQL analytics endpoint.
 
-    Auth is Azure AD, driven by FABRIC_AUTH:
-      * ActiveDirectoryInteractive (default) — opens a browser sign-in prompt on
-        the machine running this process. Fine for a locally-run Streamlit app;
-        it cannot work on a headless server, since nobody is there to click.
-      * ActiveDirectoryDeviceCode — prints a code to sign in with on any device.
-        Use this if the browser popup can't open (headless, SSH, some Macs).
-      * ActiveDirectoryDefault — reuses an existing Azure CLI / VS Code login,
-        or a managed identity when deployed. No prompt at all.
-
-    No password is ever read or stored, in any of these modes.
+    Deliberately carries NO `Authentication=`, `UID`, or `PWD`. Azure AD sign-in
+    happens in Python (see _fabric_access_token) and the resulting token is
+    attached as a connection *attribute* — supplying both is an error.
     """
     server = os.environ["FABRIC_SQL_ENDPOINT"]
     database = os.environ["FABRIC_DATABASE"]
     driver = os.getenv("FABRIC_ODBC_DRIVER", DEFAULT_ODBC_DRIVER)
-    authentication = os.getenv("FABRIC_AUTH", "ActiveDirectoryInteractive")
 
     return (
         f"Driver={{{driver}}};"
         f"Server={server},1433;"
         f"Database={database};"
-        f"Authentication={authentication};"
         "Encrypt=Yes;"
         "TrustServerCertificate=No;"
         "Connection Timeout=60;"
     )
+
+
+# Azure AD scope for the SQL/TDS surface of Fabric — the same scope Azure SQL
+# uses, not a Fabric-specific one.
+_TOKEN_SCOPE = "https://database.windows.net/.default"
+
+# ODBC connection attribute carrying a pre-acquired AAD access token.
+# Defined by the Microsoft driver; pyodbc has no symbolic name for it.
+_SQL_COPT_SS_ACCESS_TOKEN = 1256
+
+# FABRIC_AUTH accepts the azure-identity names below. The ODBC driver's own
+# names are kept as aliases so existing .env files keep resolving to something
+# sensible rather than failing on a value that merely *looks* right.
+_AUTH_ALIASES = {
+    "activedirectoryinteractive": "interactivebrowser",
+    "interactive": "interactivebrowser",
+    "browser": "interactivebrowser",
+    "activedirectorydevicecode": "devicecode",
+    "activedirectorydefault": "default",
+    "activedirectoryserviceprincipal": "serviceprincipal",
+}
+
+
+# Where the AuthenticationRecord is kept. Sits beside the Parquet cache rather
+# than in the repo — it is per-machine, per-user state, not project config.
+_AUTH_RECORD_PATH = CACHE_PATH.parent / "auth_record.json"
+
+
+def _read_auth_record():
+    """The stored AuthenticationRecord, or None if there isn't a usable one.
+
+    A missing or corrupt record is not an error: it just means the next sign-in
+    is interactive, which is exactly the first-run path anyway.
+    """
+    if not _AUTH_RECORD_PATH.exists():
+        return None
+    try:
+        from azure.identity import AuthenticationRecord  # noqa: PLC0415
+
+        return AuthenticationRecord.deserialize(_AUTH_RECORD_PATH.read_text())
+    except Exception:  # noqa: BLE001 - any failure means "re-authenticate"
+        logger.warning(
+            "Ignoring unreadable auth record at %s; will sign in again.",
+            _AUTH_RECORD_PATH,
+        )
+        return None
+
+
+def _write_auth_record(record) -> None:
+    """Persist the AuthenticationRecord so the next run can reuse the cache."""
+    try:
+        _AUTH_RECORD_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _AUTH_RECORD_PATH.write_text(record.serialize())
+    except OSError as e:
+        # Losing the record costs an extra sign-in, nothing more — never fail
+        # a data load over it.
+        logger.warning("Could not save auth record: %s", e)
+
+
+def _fabric_credential():
+    """Build the azure-identity credential named by FABRIC_AUTH.
+
+    Sign-in is done here rather than by the ODBC driver because the driver's
+    browser-based modes are Windows-only. On macOS the driver accepts
+    `Authentication=ActiveDirectoryInteractive` and then hangs until timeout,
+    and it rejects `ActiveDirectoryDefault`/`ActiveDirectoryDeviceCode` as
+    invalid values outright. azure-identity implements all of these properly on
+    every platform, so it owns auth and the driver just carries the token.
+
+    Modes:
+      * devicecode (default) — prints a URL and a code to enter on any device.
+        Works headless and over SSH; the prompt is logged at WARNING so it is
+        visible in the terminal running Streamlit.
+      * interactivebrowser — opens a real browser sign-in on this machine.
+      * serviceprincipal — non-interactive, for deployment. Requires
+        FABRIC_TENANT_ID, FABRIC_CLIENT_ID and FABRIC_CLIENT_SECRET.
+      * default — DefaultAzureCredential: managed identity, env vars, or an
+        existing `az login` session, in that order. No prompt.
+
+    Only the serviceprincipal mode involves a stored secret.
+    """
+    try:
+        from azure.identity import (  # noqa: PLC0415
+            ClientSecretCredential,
+            DefaultAzureCredential,
+            DeviceCodeCredential,
+            InteractiveBrowserCredential,
+            TokenCachePersistenceOptions,
+        )
+    except ImportError as e:
+        raise RuntimeError(
+            "azure-identity is not installed. Run: pip install -e '.[fabric]'"
+        ) from e
+
+    raw = os.getenv("FABRIC_AUTH", "devicecode").strip()
+    mode = _AUTH_ALIASES.get(raw.lower(), raw.lower())
+
+    # Persist tokens in the OS keychain so a human is prompted about once a
+    # month (refresh-token lifetime) rather than on every process start.
+    # Service principal and managed identity need no cache — they can
+    # re-authenticate silently.
+    cache = TokenCachePersistenceOptions()
+    tenant = os.getenv("FABRIC_TENANT_ID", "").strip() or "organizations"
+
+    # The keychain cache alone is NOT enough for the interactive modes: it
+    # stores the token, but a fresh credential object has no idea which account
+    # to look up, so it re-prompts every process start. The AuthenticationRecord
+    # is that missing pointer (home account id, tenant, username, authority) —
+    # identifying data, not a credential, which is why it can sit on disk.
+    record = _read_auth_record()
+
+    if mode == "devicecode":
+        return DeviceCodeCredential(
+            tenant_id=tenant,
+            cache_persistence_options=cache,
+            authentication_record=record,
+            prompt_callback=lambda uri, code, expires: logger.warning(
+                "AZURE AD SIGN-IN REQUIRED: open %s and enter code %s", uri, code
+            ),
+        )
+    if mode == "interactivebrowser":
+        return InteractiveBrowserCredential(
+            tenant_id=tenant,
+            cache_persistence_options=cache,
+            authentication_record=record,
+        )
+    if mode == "serviceprincipal":
+        missing = [
+            var
+            for var in ("FABRIC_TENANT_ID", "FABRIC_CLIENT_ID", "FABRIC_CLIENT_SECRET")
+            if not os.getenv(var, "").strip()
+        ]
+        if missing:
+            raise RuntimeError(
+                f"FABRIC_AUTH=serviceprincipal requires {', '.join(missing)} in .env."
+            )
+        return ClientSecretCredential(
+            tenant_id=os.environ["FABRIC_TENANT_ID"],
+            client_id=os.environ["FABRIC_CLIENT_ID"],
+            client_secret=os.environ["FABRIC_CLIENT_SECRET"],
+        )
+    if mode == "default":
+        return DefaultAzureCredential()
+
+    raise ValueError(
+        f"FABRIC_AUTH={raw!r} is not a supported auth mode. Expected one of: "
+        "devicecode, interactivebrowser, serviceprincipal, default."
+    )
+
+
+def _fabric_access_token() -> bytes:
+    """Acquire an Azure AD token, packed in the layout the ODBC driver expects.
+
+    The driver wants a 4-byte little-endian length followed by the token as
+    UTF-16-LE — not the bare token string.
+    """
+    credential = _fabric_credential()
+
+    # First interactive sign-in on this machine: authenticate() runs the flow
+    # and returns the record that makes every later run silent. Only the
+    # interactive credentials define it — service principal and managed
+    # identity re-authenticate silently and need no record.
+    #
+    # A failure here is deliberately allowed to propagate. Catching it and
+    # falling through to get_token() starts a SECOND device-code flow issuing a
+    # DIFFERENT code, so a user who was merely slow gets a fresh code they never
+    # saw and waits out two timeouts instead of one.
+    if _read_auth_record() is None and hasattr(credential, "authenticate"):
+        _write_auth_record(credential.authenticate(scopes=[_TOKEN_SCOPE]))
+
+    # Silent after the above: reads the token straight from the keychain cache.
+    token = credential.get_token(_TOKEN_SCOPE)
+    token_bytes = token.token.encode("UTF-16-LE")
+    return struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
 
 
 @st.cache_data(ttl=86400)
@@ -191,7 +376,10 @@ def _load_from_lakehouse() -> pd.DataFrame:
     logger.info("Connecting to Fabric SQL analytics endpoint at %s", endpoint)
 
     try:
-        conn = pyodbc.connect(_fabric_connection_string())
+        conn = pyodbc.connect(
+            _fabric_connection_string(),
+            attrs_before={_SQL_COPT_SS_ACCESS_TOKEN: _fabric_access_token()},
+        )
     except pyodbc.InterfaceError as e:
         # IM002 means the ODBC *driver* is missing — a system-level install that
         # pip cannot do for you. It is by far the most common first-run failure,
@@ -278,18 +466,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112182",
             "vendor_item": "0620064012",
             "implantable": "false",
-            "base_cost": 185.99,
             "uom_unit_of_measure": "BX",
             "global_trade_item_number": "10801741030021",
             "item_description": "DRN PEZZER PROPORTIONATE 12FR",
             "item_description2": "BX6/EA1",
             "item_description3": "CATHETER NEPHROSTOMY DRAINAGE 12FR LATEX 2 EYE PROPORTIONATE HEAD DISPOSABLE PEZZERS",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00801741030024",
             "manufacturer_code": "BARD",
             "manufacturer_number": "064012",
-            "san_multi_use_qty": 0,
             "contract": "1020285",
             "contract_line": 8,
             "on_hold": True,
@@ -298,18 +483,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112213",
             "vendor_item": "0620064010",
             "implantable": "false",
-            "base_cost": 185.99,
             "uom_unit_of_measure": "CA",
             "global_trade_item_number": "10801741030014",
             "item_description": "DRN PEZZER PROPORTIONATE 10FR",
             "item_description2": "CA6/EA1",
             "item_description3": "CATHETER NEPHROSTOMY DRAINAGE 10FR 2 EYES PROPORTIONATE HEAD TIP WITHOUT BALLOON PEZZER",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00801741030017",
             "manufacturer_code": "BARD",
             "manufacturer_number": "064010",
-            "san_multi_use_qty": 0,
             "contract": "1020285",
             "contract_line": 26,
             "on_hold": True,
@@ -318,18 +500,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6114704",
             "vendor_item": "420127",
             "implantable": "false",
-            "base_cost": 17.49,
             "uom_unit_of_measure": "BX",
             "global_trade_item_number": "10768455118219",
             "item_description": "DRSG HYDROFBR ROPE 1X45CM",
             "item_description2": "BX5/EA1",
             "item_description3": "DRESSING HYDROCOLLOID W1XL45CM ABSORBENT WITH STRENGTHENING FIBER HYDROFIBER AQUACEL",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00768455118212",
             "manufacturer_code": "CONV",
             "manufacturer_number": "420127",
-            "san_multi_use_qty": 0,
             "contract": "1020670",
             "contract_line": 3,
             "on_hold": True,
@@ -338,18 +517,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6114753",
             "vendor_item": "1638187955",
             "implantable": "false",
-            "base_cost": 9.65,
             "uom_unit_of_measure": "BX",
             "global_trade_item_number": "00768455106912",
             "item_description": "DRSG DUODERM XTHN 4X4",
             "item_description2": "BX10/EA1",
             "item_description3": "DRESSING HYDROCOLLOID W4XL4IN BEIGE SQUARE VAPOR PERMEABLE OUTER FILM TRANSLUCENT BACKING FLEXIBLE CONFORMABLE DUODERM EXTRA THIN CGF",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00768455150922",
             "manufacturer_code": "CONV",
             "manufacturer_number": "187955",
-            "san_multi_use_qty": 0,
             "contract": "1020669",
             "contract_line": 3,
             "on_hold": True,
@@ -358,18 +534,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6114795",
             "vendor_item": "187660",
             "implantable": "false",
-            "base_cost": 1.272,
             "uom_unit_of_measure": "EA",
             "global_trade_item_number": "00768455174843",
             "item_description": "DRSG DUODERM CGF 4X4",
             "item_description2": "BX5/EA1",
             "item_description3": "DRESSING HYDROCOLLOID W4XL4IN BEIGE SQUARE MOISTURE RETENTIVE DUODERM CGF",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": None,
             "manufacturer_code": "CONV",
             "manufacturer_number": "187660",
-            "san_multi_use_qty": 0,
             "contract": "1020670",
             "contract_line": 8,
             "on_hold": True,
@@ -379,18 +552,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112009",
             "vendor_item": "6112009",
             "implantable": "false",
-            "base_cost": 0.93,
             "uom_unit_of_measure": "PR",
             "global_trade_item_number": "05060097930852",
             "item_description": "GLOVE SURG BIOGEL PF 6.0",
             "item_description2": "CA200/BX50/PR1",
             "item_description3": "GLOVE SURGICAL 6 BIOGEL SURGEONS LATEX STRAW POWDER FREE",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": None,
             "manufacturer_code": "MOLN",
             "manufacturer_number": "30460",
-            "san_multi_use_qty": 0,
             "contract": "1021882",
             "contract_line": 3,
             "on_hold": False,
@@ -399,18 +569,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112010",
             "vendor_item": "30465",
             "implantable": "false",
-            "base_cost": 52.00,
             "uom_unit_of_measure": "BX",
             "global_trade_item_number": "05060097930944",
             "item_description": "GLOVE SURG BIOGEL PF 6.5",
             "item_description2": "CA200/BX50/PR1",
             "item_description3": "GLOVE SURGICAL LATEX SIZE 6.5 STERILE POWDER FREE BIOGEL SURGEONS",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "05060097930869",
             "manufacturer_code": "MOLN",
             "manufacturer_number": "30465",
-            "san_multi_use_qty": 0,
             "contract": "1021525",
             "contract_line": 41,
             "on_hold": False,
@@ -419,18 +586,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112011",
             "vendor_item": "30470",
             "implantable": "false",
-            "base_cost": 208.00,
             "uom_unit_of_measure": "CA",
             "global_trade_item_number": "05060097931118",
             "item_description": "GLOVE SURG BIOGEL PF 7.0",
             "item_description2": "CA200/BX50/PR1",
             "item_description3": "GLOVE SURGICAL LATEX SIZE 7 STERILE POWDER FREE BIOGEL SURGEONS",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "05060097930876",
             "manufacturer_code": "MOLN",
             "manufacturer_number": "30470",
-            "san_multi_use_qty": 0,
             "contract": "1021503",
             "contract_line": 3,
             "on_hold": False,
@@ -439,18 +603,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112107",
             "vendor_item": "6112107",
             "implantable": "false",
-            "base_cost": 71.40,
             "uom_unit_of_measure": "BX",
             "global_trade_item_number": "00732094178258",
             "item_description": "BULB OTO HALOGEN 3.5V",
             "item_description2": "BX6/EA1",
             "item_description3": "LAMP HALOGEN 3.5V W0.25XH0.75IN D0.25IN",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00732094025163",
             "manufacturer_code": "WECL",
             "manufacturer_number": "03100-U6",
-            "san_multi_use_qty": 0,
             "contract": "1021882",
             "contract_line": 17,
             "on_hold": False,
@@ -459,18 +620,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112160",
             "vendor_item": "8888570556",
             "implantable": "false",
-            "base_cost": 104.38,
             "uom_unit_of_measure": "CA",
             "global_trade_item_number": "20884521050850",
             "item_description": "CATH THORACIC ARGYLE ST 32FR",
             "item_description2": "CA10/EA1",
             "item_description3": "CATHETER THORACIC 32FR L20IN STRAIGHT PVC THERMOSENSITIVE DISPOSABLE ARGYLE",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "10884521050853",
             "manufacturer_code": "CARD",
             "manufacturer_number": "8888570556",
-            "san_multi_use_qty": 0,
             "contract": "1022692",
             "contract_line": 1141,
             "on_hold": False,
@@ -479,18 +637,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112164",
             "vendor_item": "0070430",
             "implantable": "false",
-            "base_cost": 4.50,
             "uom_unit_of_measure": "EA",
             "global_trade_item_number": "00801741090752",
             "item_description": "DRN SIL HBLS FLAT FULLPERF21FR",
             "item_description2": "BX10/EA1",
             "item_description3": "DRAIN SURGICAL W7MMXL20CM SILICONE HUBLESS FLAT FULL PERFORATION RADIOPAQUE STRIPE FOR XRAY DETECTION",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": None,
             "manufacturer_code": "BARD",
             "manufacturer_number": "0070430",
-            "san_multi_use_qty": 0,
             "contract": "1021202",
             "contract_line": 12,
             "on_hold": False,
@@ -499,18 +654,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112165",
             "vendor_item": "0034760",
             "implantable": "false",
-            "base_cost": 34.40,
             "uom_unit_of_measure": "CA",
             "global_trade_item_number": "10801741049184",
             "item_description": "DRN WND TROC SS MD 1/8IN",
             "item_description2": "CA10/EA1",
             "item_description3": "TROCAR SURGICAL DIA1/8IN FOR WOUND DRAINAGE PROCEDURE",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00801741049187",
             "manufacturer_code": "BARD",
             "manufacturer_number": "0034760",
-            "san_multi_use_qty": 0,
             "contract": "1021202",
             "contract_line": 13,
             "on_hold": False,
@@ -519,18 +671,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112170",
             "vendor_item": "072186",
             "implantable": "false",
-            "base_cost": 120.80,
             "uom_unit_of_measure": "CA",
             "global_trade_item_number": "10801741049689",
             "item_description": "DRN CH RD FULL FLUTE 10FR",
             "item_description2": "CA10/EA1",
             "item_description3": "DRAIN SURGICAL 10FR X 1/8IN SILICONE ROUND CLOSED WOUND SUCTION CHANNEL FULL FLUTED RADIOPAQUE",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00801741049682",
             "manufacturer_code": "BARD",
             "manufacturer_number": "072186",
-            "san_multi_use_qty": 0,
             "contract": "1021202",
             "contract_line": 17,
             "on_hold": False,
@@ -539,18 +688,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112174",
             "vendor_item": "6112174",
             "implantable": "false",
-            "base_cost": 45.00,
             "uom_unit_of_measure": "BX",
             "global_trade_item_number": "10801741090766",
             "item_description": "DRN SIL HBLS FLAT FULLPERF30FR",
             "item_description2": "BX10/EA1",
             "item_description3": "DRAIN SURGICAL W10MMXL20CM SILICONE FULL PERFORATION HUBLESS FLAT",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00801741090769",
             "manufacturer_code": "BARD",
             "manufacturer_number": "0070440",
-            "san_multi_use_qty": 0,
             "contract": "1021882",
             "contract_line": 21,
             "on_hold": False,
@@ -559,18 +705,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112181",
             "vendor_item": "SU130-1334",
             "implantable": "false",
-            "base_cost": 9.75,
             "uom_unit_of_measure": "EA",
             "global_trade_item_number": "00630140034537",
             "item_description": "DRN T TB JP SIL 19FR",
             "item_description2": "CA80/BX10/EA1",
             "item_description3": "DRAIN SURGICAL 19FR X 81CM T 8CM SILICONE PERFORATED FOR HYSTERECTOMY CHOLECYSTECTOMY JACKSON-PRATT",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": None,
             "manufacturer_code": "CARD",
             "manufacturer_number": "SU130-1334",
-            "san_multi_use_qty": 0,
             "contract": "1021114",
             "contract_line": 3,
             "on_hold": False,
@@ -579,18 +722,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112186",
             "vendor_item": "8888561027",
             "implantable": "false",
-            "base_cost": 356.96,
             "uom_unit_of_measure": "CA",
             "global_trade_item_number": "20884521050751",
             "item_description": "DRN TROC CATH CHEST TB 12FR",
             "item_description2": "CA10/EA1",
             "item_description3": "CATHETER THORACIC 12FR L9IN DIA4MM ALUMINUM ARGYLE",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "10884521050754",
             "manufacturer_code": "CARD",
             "manufacturer_number": "8888561027",
-            "san_multi_use_qty": 0,
             "contract": "1022692",
             "contract_line": 1145,
             "on_hold": False,
@@ -599,18 +739,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112236",
             "vendor_item": "6112236",
             "implantable": "false",
-            "base_cost": 11.08,
             "uom_unit_of_measure": "BX",
             "global_trade_item_number": "00610075073009",
             "item_description": "BELT OSTOMY ADJ MD 23-43IN",
             "item_description2": "BX10/EA1",
             "item_description3": "BELT OSTOMY MD 23-43IN BEIGE REUSABLE ADAPT",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": "00610075114795",
             "manufacturer_code": "HOLL",
             "manufacturer_number": "7300",
-            "san_multi_use_qty": 0,
             "contract": "1021882",
             "contract_line": 30,
             "on_hold": False,
@@ -619,18 +756,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112238",
             "vendor_item": "239618",
             "implantable": "false",
-            "base_cost": 6.32,
             "uom_unit_of_measure": "EA",
             "global_trade_item_number": "00610075122738",
             "item_description": "PDR ADAPT STOMA 1OZ",
             "item_description2": "EA1",
             "item_description3": "POWDER STOMA 10Z CONVENIENT PUFF BOTTLE WITH VIEWING WINDOW ADAPT",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": None,
             "manufacturer_code": "HOLL",
             "manufacturer_number": "7906",
-            "san_multi_use_qty": 0,
             "contract": "1020342",
             "contract_line": 12,
             "on_hold": False,
@@ -639,18 +773,15 @@ def _load_mock_data_fallback() -> pd.DataFrame:
             "item_number": "6112242",
             "vendor_item": "79300",
             "implantable": "false",
-            "base_cost": 1.58,
             "uom_unit_of_measure": "EA",
             "global_trade_item_number": "00610075205479",
             "item_description": "PASTE ADAPT LOW ALC 2OZ",
             "item_description2": "EA1",
             "item_description3": "PASTE SKIN BARRIER 2.1OZ RED CAP ALCOHOL ADAPT",
-            "item_type_state": "Itemmast",
             "low_uom_code_unit_of_measure": None,
             "low_uom_code_gtin": None,
             "manufacturer_code": "HOLL",
             "manufacturer_number": "79300",
-            "san_multi_use_qty": 0,
             "contract": "1020342",
             "contract_line": 96,
             "on_hold": False,
@@ -662,8 +793,6 @@ def _load_mock_data_fallback() -> pd.DataFrame:
     # Ensure GTIN is strictly string — preserves all leading zeros
     df["global_trade_item_number"] = df["global_trade_item_number"].astype(str)
     df["on_hold"] = df["on_hold"].astype(bool)
-    df["base_cost"] = df["base_cost"].astype(float)
-    df["san_multi_use_qty"] = df["san_multi_use_qty"].astype(int)
     df["contract_line"] = df["contract_line"].astype(int)
 
     logger.info("Loaded %d mock contract lines.", len(df))
@@ -717,14 +846,14 @@ def _load_mock_from_excel() -> pd.DataFrame:
         df = pd.read_parquet(dataset_path)
     else:
         df = pd.read_excel(dataset_path, sheet_name="Sheet1", dtype=str)
-    df = df.drop(columns=["key"], errors="ignore")
+    # _RETIRED_COLUMNS is dropped here, not just left out of the Fabric SELECT,
+    # because this path reads whatever dataset it finds — including an older
+    # ~/Downloads/contract_line.xlsx that still carries base_cost. Stripping on
+    # read means no local file can put pricing back into memory.
+    df = df.drop(columns=["key", *_RETIRED_COLUMNS], errors="ignore")
 
     df["global_trade_item_number"] = df["global_trade_item_number"].astype(str)
     df["on_hold"] = _coerce_bool(df["on_hold"])
-    df["base_cost"] = df["base_cost"].astype(float)
-    df["san_multi_use_qty"] = (
-        pd.to_numeric(df["san_multi_use_qty"], errors="coerce").fillna(0).astype(int)
-    )
     df["contract_line"] = (
         pd.to_numeric(df["contract_line"], errors="coerce").fillna(0).astype(int)
     )
