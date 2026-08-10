@@ -976,8 +976,12 @@ _JS = r"""
       beep(330, 0.00, 0.17, 0.26, 'sawtooth');
       beep(196, 0.18, 0.28, 0.26, 'sawtooth');
     } else if (kind === 'cache' || kind === 'api') {
-      /* Clean: a soft, short confirmation click. */
-      beep(1318, 0.00, 0.05, 0.09, 'sine');
+      /* Clean confirmation chime: loud enough to register over warehouse
+         noise and distinct enough not to read as a glitch, but still
+         obviously not the hold/notfound alarms. Two quick rising notes,
+         not one faint click, so a picker moving fast still hears it. */
+      beep(988, 0.00, 0.09, 0.24, 'sine');
+      beep(1318, 0.07, 0.11, 0.24, 'sine');
     }
   }
 
@@ -1015,69 +1019,221 @@ _JS = r"""
   on(P, 'focus', function () { focusInput(); }, false);
 
   /* ── Auto-submit: hands-free scanning ───────────────────────────────────
-     Most handheld scanners are keyboard emulators configured to append a CR,
-     and Enter inside an st.form already submits — for those guns this code
-     never fires. It exists for guns with no suffix configured, so a picker
-     never has to touch the screen between items.
+     Scanning is the job. Typing a GTIN by hand happens maybe one time in
+     twenty, so this is tuned to make every scan resolve on its own rather than
+     to keep manual entry pristine — manual entry still has the Look Up button
+     and the Enter key, and if a finished hand-typed GTIN also auto-resolves,
+     that is the outcome the picker wanted anyway.
 
-     There is no "scan complete" event, so the end of a barcode is inferred:
-     the input must look like a GTIN (digits only, 8/12/13/14 long), the
-     keystrokes must have arrived at scanner speed rather than human speed,
-     and input must then go quiet. Gating on speed is what keeps a human
-     typing a GTIN by hand — who pauses mid-number — from firing a lookup on
-     a partial code and recording a spurious Not Found. */
-  var SCAN_GAP_MS = 35;    /* Slowest inter-keystroke gap still called a gun. */
-  var QUIET_MS = 80;       /* Silence after the last key that ends a barcode. */
-  var GTIN_LENGTHS = { 8: 1, 12: 1, 13: 1, 14: 1 };
+     Two independent triggers, either of which fires once input goes quiet:
 
-  var lastKeyAt = 0, humanTyped = false, quietTimer = null;
+       * MACHINE CADENCE — the characters arrived faster than a hand can move,
+         so whatever is in the field IS a scan. Fires quickly (QUIET_FAST_MS)
+         on anything holding a GTIN's worth of digits, deliberately without
+         asking whether the payload is well-formed: a misprinted label or an
+         unexpected barcode should still resolve to a recorded miss instead of
+         sitting there waiting for a tap.
+
+       * COMPLETE GTIN — the field holds a finished, check-digit-valid GTIN, on
+         its own or inside a GS1 composite. Cadence is irrelevant here, and that
+         is the entire point: it is the backstop for every delivery mode the
+         cadence test cannot see. Waits out a longer silence (QUIET_SLOW_MS) so
+         a typist pausing mid-number is not cut off.
+
+     Cadence used to be a *gate* — nothing fired unless it said "machine" — and
+     that is why scanning appeared to do nothing at all. The handheld is a Zebra
+     HC50: an Android device whose DataWedge keystroke output injects through an
+     IME, so the payload lands in a single commitText() and the field jumps from
+     empty to the whole barcode in one event, with no per-keystroke gaps to
+     measure. The old rule read that as a human pasting and refused to fire.
+     Cadence now only chooses how long to wait, never whether to go.
+
+     Which is also why the machine test averages gaps instead of gating each
+     one: on the character-by-character path (DataWedge with an inter-character
+     delay, or a plain HID gun) Streamlit re-renders the field on every
+     character, and a busy main thread stretches a single gap past any per-key
+     threshold while the gun is firing at full speed. A mean under 40ms is ~25
+     characters/second sustained — no hand goes there. */
+  var HUMAN_GAP_MS = 120;   /* One gap this long is a person pausing mid-number. */
+  var MEAN_GAP_MS = 40;     /* Mean gap at or under this is machine cadence. */
+  var QUIET_FAST_MS = 120;  /* Silence that ends a barcode we already know is a scan. */
+  var QUIET_SLOW_MS = 700;  /* Silence that ends anything else holding a full GTIN. */
+  var MIN_SCAN_LEN = 8;     /* Shortest payload worth a lookup (GTIN-8). */
 
   function submitBtn() {
     return D.querySelector('.st-key-sf_scan button[kind="formSubmit"]')
         || D.querySelector('.st-key-sf_scan button');
   }
 
+  /* Deliberately looser than a bare GTIN. The same guns emit GS1 composites
+     carrying AIs, lot and expiry, sometimes behind a ]d2 / ]C1 symbology
+     prefix — core.lookup.extract_gtin() is what pulls the GTIN back out of
+     those. Insisting on digits-only at exactly 8/12/13/14 excluded every
+     DataMatrix on the floor from ever auto-submitting. */
+  function scannable(v) {
+    return v.length >= MIN_SCAN_LEN && (v.match(/\d/g) || []).length >= MIN_SCAN_LEN;
+  }
+
+  /* Mirror of engine.gtin.check_digit_valid(): left-pad 8-14 digits to GTIN-14
+     and verify the mod-10 check digit, weights 3,1,3,1… from the right. This
+     is what makes the cadence-free path safe to have at all — a half-typed
+     number only survives it about one time in ten, so the slow trigger can
+     fire on a quiet field without littering the session with bogus misses.
+     Keep in step with engine/gtin.py. */
+  function checkDigitValid(v) {
+    v = (v || '').replace(/^\s+|\s+$/g, '');  /* engine.gtin.normalize() strips too */
+    if (!/^\d{8,14}$/.test(v)) return false;
+    var n = ('00000000000000' + v).slice(-14), total = 0;
+    for (var i = 0; i < 13; i++) {
+      total += Number(n.charAt(12 - i)) * (i % 2 === 0 ? 3 : 1);
+    }
+    return String((10 - (total % 10)) % 10) === n.charAt(13);
+  }
+
+  /* The shape core.lookup.extract_gtin() pulls apart: optional symbology
+     prefix, AI 01, then the GTIN. Anything trailing it (lot, expiry) is extra
+     and does not have to have arrived yet. */
+  var COMPOSITE_RE = /^(?:\][A-Za-z0-9]{2})?01(\d{14})/;
+  function completeGtin(v) {
+    var m = COMPOSITE_RE.exec(v);
+    return checkDigitValid(m ? m[1] : v);
+  }
+
+  /* Timestamps come off the event, not off the clock inside the handler:
+     e.timeStamp is stamped when the browser creates the event, so it measures
+     the gun's cadence rather than how backed up the main thread was. */
+  function eventTime(e) {
+    if (typeof e.timeStamp === 'number' && e.timeStamp > 0) return e.timeStamp;
+    return (P.performance && P.performance.now) ? P.performance.now() : Date.now();
+  }
+
+  var quietTimer = null;
+  var burst = { start: 0, last: 0, chars: 0, verdict: null };
+  /* Seeded from the field, not from 0: a rerun for some unrelated reason (the
+     sound toggle) remounts this realm with whatever the picker had already
+     typed still in the box, and treating that length as freshly-added text
+     would read the next keystroke as a coalesced burst. */
+  var lastLen = (function () { var el = input(); return el ? (el.value || '').length : 0; })();
+
+  function resetBurst() {
+    burst.start = 0; burst.last = 0; burst.chars = 0; burst.verdict = null;
+    if (quietTimer) { P.clearTimeout(quietTimer); quietTimer = null; }
+  }
+
+  function isMachine() {
+    if (burst.verdict !== null) return burst.verdict;
+    if (burst.chars < MIN_SCAN_LEN) return false;
+    /* Only reached when every event carried exactly one character, so the gap
+       count is chars - 1. */
+    return (burst.last - burst.start) / (burst.chars - 1) <= MEAN_GAP_MS;
+  }
+
   /* One auto-submit per runtime mount. The submit triggers st.rerun(), which
      tears this realm down and mounts a fresh one with the flag clear — so a
      scan landing mid-round-trip cannot double-fire a lookup against a form
      Streamlit is already rebuilding. */
-  function autoSubmit() {
+  function fire() {
     if (S.submitted) return;
-    var el = input();
-    if (!el) return;
-    var v = (el.value || '').trim();
-    if (!GTIN_LENGTHS[v.length] || !/^\d+$/.test(v)) return;
     var btn = submitBtn();
     if (!btn) return;
     S.submitted = true;
     btn.click();
   }
 
+  /* Arm the two-stage quiet timer. Stage one is the scan path: if cadence
+     already proved this was a gun, a short silence is the whole barcode. Stage
+     two waits out the rest of a long silence and asks the payload itself
+     instead — which is what catches a scan whose delivery cadence told us
+     nothing. Any further input clears both stages and re-arms, so the slow
+     stage only completes on a field that has genuinely stopped changing. */
+  function arm() {
+    if (quietTimer) { P.clearTimeout(quietTimer); quietTimer = null; }
+    quietTimer = P.setTimeout(function () {
+      quietTimer = null;
+      var el = input();
+      var v = el ? (el.value || '').trim() : '';
+      if (isMachine() && scannable(v)) { fire(); return; }
+      quietTimer = P.setTimeout(function () {
+        quietTimer = null;
+        var el2 = input();
+        if (el2 && completeGtin((el2.value || '').trim())) fire();
+      }, QUIET_SLOW_MS - QUIET_FAST_MS);
+    }, QUIET_FAST_MS);
+  }
+
   on(D, 'input', function (e) {
     var el = input();
     if (!el || e.target !== el) return;
 
-    var now = (P.performance && P.performance.now) ? P.performance.now() : Date.now();
-    var gap = now - lastKeyAt;
-    lastKeyAt = now;
+    var ts = eventTime(e);
+    var len = (el.value || '').length;
+    var added = len - lastLen;
+    lastLen = len;
 
-    /* A field going from empty (cleared form, Esc, fresh mount) starts a new
-       barcode — the gap back to the previous field's last keystroke says
-       nothing about who is typing this one. */
-    if ((el.value || '').length <= 1) humanTyped = false;
-    else if (gap > SCAN_GAP_MS) humanTyped = true;
+    /* A cleared form or Esc starts over with nothing pending. */
+    if (len === 0) { resetBurst(); return; }
 
-    if (quietTimer) { P.clearTimeout(quietTimer); quietTimer = null; }
-    if (humanTyped) return;
-    quietTimer = P.setTimeout(function () { quietTimer = null; autoSubmit(); }, QUIET_MS);
+    /* A backspace is proof of a human — no gun edits what it just sent — but
+       the field can still be left holding a finished GTIN, so the slow trigger
+       keeps its chance. The burst is NOT reset here: doing so would let the
+       next keystroke look like the opening event of a fresh coalesced burst
+       and flip the verdict back to machine mid-edit. */
+    if (added < 0) {
+      burst.verdict = false;
+      burst.chars = len;
+      burst.last = ts;
+      arm();
+      return;
+    }
+
+    if (burst.chars === 0) {
+      /* First characters of a new barcode. Whatever is already in the field
+         belongs to this burst, and more than one character in the opening
+         event is the coalesced case — machine, decided on the spot. */
+      burst.start = ts;
+      burst.verdict = len > 1 ? true : null;
+    } else if (added > 1) {
+      burst.verdict = true;
+    } else if (burst.verdict === null && ts - burst.last > HUMAN_GAP_MS) {
+      burst.verdict = false;
+    }
+    burst.chars = len;
+    burst.last = ts;
+
+    arm();
   }, true);
   S.off.push(function () { if (quietTimer) { P.clearTimeout(quietTimer); quietTimer = null; } });
+
+  /* A CR or Tab suffix — DataWedge's "Send ENTER key" / "Send TAB key", or a
+     HID gun's configured suffix — marks the end of the payload outright, so
+     there is nothing to infer and no silence worth sitting through. Handled
+     here rather than left to Streamlit's own in-form Enter because Tab would
+     otherwise just walk focus off the field, and because clicking the button
+     ourselves is the same deterministic path the picker's finger takes.
+     Streamlit still gets the event untouched whenever we decline to act on it
+     (nothing worth looking up, or no button to click), so its native Enter
+     handling remains the fallback. */
+  on(D, 'keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== 'Tab') return;
+    var el = input();
+    if (!el || e.target !== el) return;
+    if (!scannable((el.value || '').trim()) || !submitBtn()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (quietTimer) { P.clearTimeout(quietTimer); quietTimer = null; }
+    fire();
+  }, true);
 
   /* ── Esc: drop the result and re-arm ──────────────────────────────────── */
   on(D, 'keydown', function (e) {
     if (e.key !== 'Escape') return;
     var el = input();
+    /* Clearing the value by hand fires no input event, so the burst tracker
+       has to be told the field is empty — otherwise the next scan looks like a
+       continuation of the abandoned one. */
     if (el) el.value = '';
+    lastLen = 0;
+    resetBurst();
     var btn = D.querySelector('.st-key-sf_clear button');
     if (btn) btn.click(); else focusInput();
   }, true);
