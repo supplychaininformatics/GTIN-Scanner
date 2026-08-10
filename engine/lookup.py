@@ -38,39 +38,49 @@ logger = logging.getLogger(__name__)
 #
 # The point of splitting these out is that they need different responses:
 # BAD_GTIN is a scanning problem, PADDING is a normalisation bug, PACKAGING is
-# a UI/matching gap, and UNKNOWN_ITEM / OFF_CONTRACT are contract-data gaps
-# that belong with contracting rather than the warehouse.
+# a UI/matching gap, and NO_CONTRACT_LINE is a data gap to investigate.
+#
+# Each bucket asserts only what the code actually proved. In particular there
+# is deliberately NO "off contract" bucket, and the surviving one is named for
+# the *lookup* rather than the item. Everything in the warehouse is on some
+# contract by definition — it could not have been bought otherwise — so a miss
+# is never evidence that an item is off contract. It means the barcode is not
+# in the contract file this app loaded, which happens routinely to fully
+# contracted stock: the source row's GTIN cell is blank or stale, the
+# manufacturer re-barcoded the same item, the line sits on a contract outside
+# this load's scope (consignment, bill-only, another tier), or the cache
+# predates the item being added. Naming the bucket after the file keeps it a
+# finding to chase rather than a verdict on the item.
 MISS_BAD_GTIN = "bad_gtin"
 MISS_PADDING = "padding"
 MISS_PACKAGING = "packaging"
-MISS_UNKNOWN_ITEM = "unknown_item"
-MISS_OFF_CONTRACT = "off_contract"
+MISS_NO_CONTRACT_LINE = "no_contract_line"
 
 MISS_LABELS = {
     MISS_BAD_GTIN: "Invalid barcode",
     MISS_PADDING: "Width mismatch",
     MISS_PACKAGING: "Different packaging level",
-    MISS_UNKNOWN_ITEM: "Vendor on contract, item not",
-    MISS_OFF_CONTRACT: "Vendor not on contract",
+    MISS_NO_CONTRACT_LINE: "No contract line for this barcode",
 }
 
-# Minimum shared leading digits of the 12-digit core before a miss is called
-# UNKNOWN_ITEM ("we buy from this vendor") rather than OFF_CONTRACT ("we do
-# not").
+# Display threshold only: below this many shared leading digits, the closest
+# indexed core is coincidence and naming it would hand a buyer a false lead.
+# It selects nothing and changes no bucket — every miss below it reports the
+# same reason as every miss above it, just without the pointer.
 #
-# A GS1 company prefix can be as short as 6 digits, but 6 is unusable as a
-# threshold here: with ~78k distinct cores indexed, short prefixes collide by
-# chance. Measured against the real contract file (130k lines), the longest
-# prefix a *random* valid GTIN shares with any indexed core was:
+# A GS1 company prefix can be as short as 6 digits, but 6 is unusable here:
+# with ~78k distinct cores indexed, short prefixes collide by chance. Measured
+# against the real contract file (130k lines), the longest prefix a *random*
+# valid GTIN shared with any indexed core was:
 #
 #     0-5 digits  99.74%      7 digits  0.03%  (1 sample in 3000)
 #       6 digits   0.23%      8+        never
 #
-# while two real off-contract items from vendors that are on contract scored
-# 11 and 10. 8 therefore sits above the observed noise ceiling and well below
-# the real signal. Re-measure if the contract file grows by an order of
-# magnitude — the noise floor rises with the number of indexed cores.
-MIN_SHARED_PREFIX = 8
+# while two real items from vendors already on contract scored 11 and 10. 8
+# therefore sits above the observed noise ceiling and well below the real
+# signal. Re-measure if the contract file grows by an order of magnitude — the
+# noise floor rises with the number of indexed cores.
+LEAD_MIN_SHARED = 8
 
 
 class LookupEngine:
@@ -139,12 +149,18 @@ class LookupEngine:
 
         self._sorted_cores: list[str] = sorted(self._by_core)
 
-    def _longest_shared_prefix(self, body: str) -> int:
-        """Digits `body` shares with the closest known core (see _build_diagnostics)."""
+    def _closest_core(self, body: str) -> tuple[int, str]:
+        """Closest known core to `body`, as (shared leading digits, that core).
+
+        Returns (0, "") when nothing is indexed. The core is returned alongside
+        the count so diagnose() can name the actual near-miss GTIN rather than
+        report a bare digit count — a buyer chasing a missing contract line can
+        act on "closest is 00382903891234", not on "shares 11 digits".
+        """
         if not body or not self._sorted_cores:
-            return 0
+            return 0, ""
         pos = bisect.bisect_left(self._sorted_cores, body)
-        best = 0
+        best, best_core = 0, ""
         for neighbour in self._sorted_cores[max(0, pos - 1):pos + 2]:
             shared = 0
             # strict=False is the point: comparison stops at the shorter of
@@ -153,8 +169,9 @@ class LookupEngine:
                 if a != b:
                     break
                 shared += 1
-            best = max(best, shared)
-        return best
+            if shared > best:
+                best, best_core = shared, neighbour
+        return best, best_core
 
     @staticmethod
     def _clean_gtin(value: object) -> str:
@@ -201,6 +218,11 @@ class LookupEngine:
         before the contract is consulted at all, so a misread can never be
         reported as a contract-data gap.
 
+        NO_CONTRACT_LINE is the fallthrough, and it is a statement about this
+        app's contract file rather than about the item — see the MISS_*
+        comments above for why a miss is never evidence that something is off
+        contract. Its detail may name the closest indexed GTIN as a lead.
+
         PACKAGING is advisory only. It means "a GTIN sharing this item's core
         is on contract at a different packaging level" — strong evidence under
         the usual GS1 convention, but not a guarantee the two are the same
@@ -243,16 +265,21 @@ class LookupEngine:
                 f"scanned {scanned_level}; on contract as {shown}{more}",
             )
 
-        shared = self._longest_shared_prefix(core(norm))
-        digits = "digit" if shared == 1 else "digits"
-        if shared >= MIN_SHARED_PREFIX:
+        # One bucket, and the detail is an observation rather than a claim: the
+        # nearest indexed GTIN is a lead for whoever chases the missing line,
+        # not a statement about who supplies the item. Below LEAD_MIN_SHARED
+        # there is no lead worth printing, but the reason is unchanged.
+        shared, closest = self._closest_core(core(norm))
+        if shared >= LEAD_MIN_SHARED and closest:
+            sibling, record = self._by_core[closest][0]
+            digits = "digit" if shared == 1 else "digits"
             return self._miss(
-                MISS_UNKNOWN_ITEM,
-                f"vendor prefix matches {shared} {digits} — item not on contract",
+                MISS_NO_CONTRACT_LINE,
+                f"closest on contract is {sibling}{self._lawson_suffix(record)}"
+                f" — shares {shared} leading {digits}",
             )
         return self._miss(
-            MISS_OFF_CONTRACT,
-            f"no vendor prefix match (closest is {shared} {digits})",
+            MISS_NO_CONTRACT_LINE, "no similar GTIN on contract"
         )
 
     @staticmethod

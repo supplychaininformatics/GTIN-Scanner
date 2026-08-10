@@ -23,9 +23,8 @@
 --   packaging     a GTIN sharing this item's core is on contract at a
 --                 different packaging level. Advisory — see engine/gtin.py on
 --                 why a core match is evidence and not proof.
---   unknown_item  the vendor prefix is on contract but this item reference is
---                 not. A contract-data gap; belongs with contracting.
---   off_contract  no vendor prefix match at all.
+--   unknown_item  RETIRED by 003 — folded into no_contract_line, which see
+--   off_contract  for why a shared-digit count cannot support either claim.
 --
 -- Deliberately not a CHECK constraint or an enum: the bucket set is expected
 -- to be refined once there is real scanning volume to look at, and a text

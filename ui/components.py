@@ -22,10 +22,9 @@ import streamlit as st
 from core.lookup import STATUS_API
 from engine.lookup import (
     MISS_BAD_GTIN,
-    MISS_OFF_CONTRACT,
+    MISS_NO_CONTRACT_LINE,
     MISS_PACKAGING,
     MISS_PADDING,
-    MISS_UNKNOWN_ITEM,
 )
 
 from .theme import SESSION_STATUS, STATUS
@@ -229,8 +228,7 @@ _MISS_GLYPHS = {
     MISS_BAD_GTIN: "⟳",
     MISS_PADDING: "↔",
     MISS_PACKAGING: "▤",
-    MISS_UNKNOWN_ITEM: "◍",
-    MISS_OFF_CONTRACT: "○",
+    MISS_NO_CONTRACT_LINE: "○",
 }
 
 
