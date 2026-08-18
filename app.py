@@ -67,7 +67,23 @@ st.set_page_config(
 )
 
 inject_theme()
+
+# ── Loading splash: show immediately while the app initializes ───────────────
+# Appears only once on cold start, replaced by actual content on next render.
+# This makes the "app is waking up" transition feel faster because the user
+# sees content quicker, even though backend work continues in parallel.
+loading_container = st.container()
+if "app_ready" not in st.session_state:
+    with loading_container:
+        st.markdown('<div style="text-align:center;padding:2rem"><p style="color:var(--sf-muted);font-size:0.9rem">Loading app…</p></div>', unsafe_allow_html=True)
 init_session()
+
+# ── Lazy-load the lookup engine only when a scan happens, not at startup ──────
+# This defers the ~2s contract data load to after the form loads, reducing the
+# cold-start perception. The engine is cached, so subsequent reruns are instant.
+@st.cache_resource(show_spinner=False)
+def _get_engine_lazy():
+    return get_lookup_engine()
 
 # ── Pre-scan gate: capture Sanford ID + location once per browser session ─────
 # A resumed session (refresh, reconnect, server restart) carries its session id
@@ -140,6 +156,12 @@ if not st.session_state.session_id:
             st.error("Enter a warehouse location to continue.")
     st.stop()
 
+# ── Show a loading splash while the lookup engine initializes ────────────────
+# This happens once per session, on the first scan. The engine is cached, so it
+# only actually loads once per app lifetime (or on data refresh).
+if "engine_loaded" not in st.session_state:
+    st.session_state.engine_loaded = False
+
 # ── Liveness: has this session been force-ended out from under this device? ───
 # The resume gate above only runs when session_state was empty, so a handheld
 # already in the scan loop would never notice a board/admin Force End — it
@@ -163,18 +185,26 @@ if current is None or current["status"] != store.STATUS_ACTIVE:
     st.query_params.clear()
     st.rerun()
 
-engine = get_lookup_engine()
-
 # ── Header ────────────────────────────────────────────────────────────────────
 # The KPI counters render as a 2x2 grid in the header (see .sf-kpi-grid) —
 # computed from the session's history-so-far, so this render reflects any
-# scan just recorded.
+# scan just recorded. Cache the stats in session_state so they're only
+# recomputed when history actually changes (on a scan), not on every rerun.
+history_key = tuple(e.get("gtin") for e in st.session_state.scan_history)
+if st.session_state.get("_last_history_key") != history_key:
+    st.session_state._cached_stats = compute_stats(st.session_state.scan_history)
+    st.session_state._last_history_key = history_key
+else:
+    st.session_state._cached_stats = st.session_state.get(
+        "_cached_stats", compute_stats(st.session_state.scan_history)
+    )
+
 st.markdown(
     C.header_html(
         location=st.session_state.warehouse_location,
         sanford_id=st.session_state.sanford_id,
         page_name="Handheld",
-        kpi_stats=compute_stats(st.session_state.scan_history),
+        kpi_stats=st.session_state._cached_stats,
     ),
     unsafe_allow_html=True,
 )
@@ -235,6 +265,15 @@ with st.container(key="sf_rail"):
 # ── Resolve the scan ──────────────────────────────────────────────────────────
 if submitted and gtin_input.strip():
     raw_gtin = gtin_input.strip()
+
+    # Load the engine on first scan, show a loading message while it initializes
+    if not st.session_state.engine_loaded:
+        with st.spinner("Building GTIN lookup index…"):
+            engine = _get_engine_lazy()
+            st.session_state.engine_loaded = True
+    else:
+        engine = _get_engine_lazy()
+
     # A GTIN already in this session's history is a rescan of the same item —
     # resolved instantly from what we already know, with no cache/API lookup,
     # so it can never inflate the API-hit KPI either.
@@ -330,3 +369,6 @@ scanner_runtime(
     kind=last["status_key"] if last else None,
     sound_on=st.session_state.sound_on,
 )
+
+# Mark the app as ready so the loading splash doesn't show on next render
+st.session_state.app_ready = True

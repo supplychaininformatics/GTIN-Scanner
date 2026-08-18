@@ -103,6 +103,28 @@
       "norm_label": "app.py"
     },
     {
+      "label": "cache_resource",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "app_py_cache_resource",
+      "community": 3,
+      "community_name": "app.py",
+      "norm_label": "cache_resource"
+    },
+    {
+      "label": "_get_engine_lazy()",
+      "file_type": "code",
+      "source_file": "app.py",
+      "source_location": "L85",
+      "_origin": "ast",
+      "id": "app_get_engine_lazy",
+      "community": 3,
+      "community_name": "app.py",
+      "norm_label": "_get_engine_lazy()"
+    },
+    {
       "label": "dialog",
       "file_type": "code",
       "source_file": "",
@@ -117,7 +139,7 @@
       "label": "_confirm_end_session()",
       "file_type": "code",
       "source_file": "app.py",
-      "source_location": "L184",
+      "source_location": "L214",
       "_origin": "ast",
       "id": "app_confirm_end_session",
       "community": 3,
@@ -139,9 +161,9 @@
       "label": "Gate on the one moment data could be lost for good: forgetting to export before\u2026",
       "file_type": "rationale",
       "source_file": "app.py",
-      "source_location": "L185",
+      "source_location": "L215",
       "_origin": "ast",
-      "id": "app_rationale_185",
+      "id": "app_rationale_215",
       "community": 3,
       "community_name": "app.py",
       "norm_label": "gate on the one moment data could be lost for good: forgetting to export before..."
@@ -482,7 +504,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "cache_resource",
+      "id": "core_lookup_py_cache_resource",
       "community": 0,
       "community_name": "core/lookup.py",
       "norm_label": "cache_resource"
@@ -1571,7 +1593,7 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "path",
+      "id": "data_loader_py_path",
       "community": 5,
       "community_name": "loader.py",
       "norm_label": "path"
@@ -2293,6 +2315,83 @@
       "community": 10,
       "community_name": "gtin-scanner",
       "norm_label": "gtin-scanner"
+    },
+    {
+      "label": "build_mock_dataset.py",
+      "file_type": "code",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "scripts_build_mock_dataset",
+      "community": 11,
+      "community_name": "build",
+      "norm_label": "build_mock_dataset.py"
+    },
+    {
+      "label": "build()",
+      "file_type": "code",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L46",
+      "_origin": "ast",
+      "id": "scripts_build_mock_dataset_build",
+      "community": 11,
+      "community_name": "build",
+      "norm_label": "build()"
+    },
+    {
+      "label": "Path",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "scripts_build_mock_dataset_py_path",
+      "community": 11,
+      "community_name": "build",
+      "norm_label": "path"
+    },
+    {
+      "label": "DataFrame",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "scripts_build_mock_dataset_py_dataframe",
+      "community": 11,
+      "community_name": "build",
+      "norm_label": "dataframe"
+    },
+    {
+      "label": "main()",
+      "file_type": "code",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L72",
+      "_origin": "ast",
+      "id": "scripts_build_mock_dataset_main",
+      "community": 11,
+      "community_name": "build",
+      "norm_label": "main()"
+    },
+    {
+      "label": "scripts/build_mock_dataset.py ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Turn a raw Fabric\u2026",
+      "file_type": "rationale",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "scripts_build_mock_dataset_rationale_1",
+      "community": 11,
+      "community_name": "build",
+      "norm_label": "scripts/build_mock_dataset.py ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ turn a raw fabric..."
+    },
+    {
+      "label": "Read a raw lakehouse export and write it as the canonical mock dataset.",
+      "file_type": "rationale",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L47",
+      "_origin": "ast",
+      "id": "scripts_build_mock_dataset_rationale_47",
+      "community": 11,
+      "community_name": "build",
+      "norm_label": "read a raw lakehouse export and write it as the canonical mock dataset."
     },
     {
       "label": "ui/__init__.py",
@@ -3506,11 +3605,22 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "app.py",
-      "source_location": "L184",
+      "source_location": "L214",
       "weight": 1.0,
       "_origin": "ast",
       "source": "app",
       "target": "app_confirm_end_session",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "app.py",
+      "source_location": "L85",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "app",
+      "target": "app_get_engine_lazy",
       "confidence_score": 1.0
     },
     {
@@ -3792,7 +3902,31 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "app.py",
-      "source_location": "L183",
+      "source_location": "L84",
+      "weight": 1.0,
+      "context": "decorator",
+      "_origin": "ast",
+      "source": "app_get_engine_lazy",
+      "target": "app_py_cache_resource",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "app.py",
+      "source_location": "L86",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "app_get_engine_lazy",
+      "target": "core_lookup_get_lookup_engine"
+    },
+    {
+      "relation": "references",
+      "confidence": "EXTRACTED",
+      "source_file": "app.py",
+      "source_location": "L213",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
@@ -3806,7 +3940,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "app.py",
-      "source_location": "L200",
+      "source_location": "L230",
       "weight": 1.0,
       "_origin": "ast",
       "source": "app_confirm_end_session",
@@ -3816,10 +3950,10 @@
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "app.py",
-      "source_location": "L185",
+      "source_location": "L215",
       "weight": 1.0,
       "_origin": "ast",
-      "source": "app_rationale_185",
+      "source": "app_rationale_215",
       "target": "app_confirm_end_session",
       "confidence_score": 1.0
     },
@@ -4640,7 +4774,7 @@
       "context": "decorator",
       "_origin": "ast",
       "source": "core_lookup_get_lookup_engine",
-      "target": "cache_resource",
+      "target": "core_lookup_py_cache_resource",
       "confidence_score": 1.0
     },
     {
@@ -6321,6 +6455,18 @@
       "confidence_score": 1.0
     },
     {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L35",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset",
+      "target": "data_loader",
+      "confidence_score": 1.0
+    },
+    {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
@@ -6714,7 +6860,7 @@
       "weight": 1.0,
       "_origin": "ast",
       "source": "data_loader_resolve_mock_dataset",
-      "target": "path",
+      "target": "data_loader_py_path",
       "confidence_score": 1.0
     },
     {
@@ -7620,6 +7766,86 @@
       "_origin": "ast",
       "source": "pages_board_rationale_1",
       "target": "pages_board",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L46",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset",
+      "target": "scripts_build_mock_dataset_build",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L72",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset",
+      "target": "scripts_build_mock_dataset_main",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset_rationale_1",
+      "target": "scripts_build_mock_dataset",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L46",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset_build",
+      "target": "scripts_build_mock_dataset_py_dataframe",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L46",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset_build",
+      "target": "scripts_build_mock_dataset_py_path",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L83",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset_main",
+      "target": "scripts_build_mock_dataset_build",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "scripts/build_mock_dataset.py",
+      "source_location": "L47",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "scripts_build_mock_dataset_rationale_47",
+      "target": "scripts_build_mock_dataset_build",
       "confidence_score": 1.0
     },
     {
@@ -8879,5 +9105,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "2d6f8aa9ea522fc812d34c94244076cb63eeb080"
+  "built_at_commit": "2713c6c9cade5f771a57a9314157b2f9905c37a4"
 }
