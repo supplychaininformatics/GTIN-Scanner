@@ -192,7 +192,9 @@ Open **http://localhost:8501** in your browser.
 Production data lives in a Microsoft Fabric Lakehouse. The app reaches it through
 the lakehouse's **SQL analytics endpoint** — a SQL-Server-style (TDS) connection
 over ODBC, authenticated with your own Azure AD identity. **No password is stored
-anywhere**, which is why `.env` is safe to keep in version control.
+anywhere** for the interactive modes, which is why `.env` is currently safe to
+keep in version control. That stops being true if you switch to
+`FABRIC_AUTH=serviceprincipal` — see step 4.
 
 ### 1. Install the Microsoft ODBC driver (system-level)
 
@@ -201,6 +203,8 @@ anywhere**, which is why `.env` is safe to keep in version control.
 ```bash
 # macOS
 brew tap microsoft/mssql-release https://github.com/Microsoft/homebrew-mssql-release
+# Homebrew 6+ refuses to install from a third-party tap until it is trusted:
+brew trust microsoft/mssql-release
 brew install msodbcsql18
 
 # Windows — download and run the installer:
@@ -216,6 +220,10 @@ Verify it registered: `odbcinst -q -d` (macOS/Linux), or check *ODBC Data Source
 pip install -e ".[fabric]"
 ```
 
+This installs `pyodbc` **and** `azure-identity`. Both are required: the Azure AD
+sign-in is performed by `azure-identity` in Python, not by the ODBC driver. See
+step 4 for why.
+
 ### 3. Fill in `.env`
 
 Get the endpoint and lakehouse name from the Fabric workspace:
@@ -227,31 +235,55 @@ DATA_SOURCE=fabric
 FABRIC_SQL_ENDPOINT=xxxxx.datawarehouse.fabric.microsoft.com
 FABRIC_DATABASE=your_lakehouse_name
 FABRIC_TABLE=[Silver_Lake].[infor].[contract_line]
-FABRIC_AUTH=ActiveDirectoryInteractive
+FABRIC_AUTH=devicecode
 ```
+
+`FABRIC_SQL_ENDPOINT` is a **bare hostname** — no `https://`, no trailing slash.
+The Fabric UI shows it as a URL; strip the scheme.
 
 `FABRIC_TABLE` accepts a bracket-quoted `[db].[schema].[table]` name (T-SQL
 style) or a plain `schema.table`. If the lakehouse ever renames the
 contract-line table or view, update it here — the SQL itself does not need
 editing.
 
-> **Before flipping `DATA_SOURCE=fabric` for real use:** three open questions
-> about this table's schema — a column-mapping guess, a dropped barcode-alias
-> feature, and a dropped active-line filter — are tracked in
-> [FABRIC_TODO.md](FABRIC_TODO.md). Resolve those first.
+> The three schema questions that used to block `DATA_SOURCE=fabric` (a
+> column-mapping guess, a dropped barcode alias, a dropped active-line filter)
+> were resolved against live data on 2026-08-07. Remaining items — two UI
+> labelling questions and deployment auth — are in
+> [FABRIC_TODO.md](FABRIC_TODO.md).
 
 ### 4. Run it
 
-On the first query a **browser window opens for Azure AD sign-in**. That is
-`ActiveDirectoryInteractive` doing its job. Two consequences worth knowing:
+**Sign-in is handled by `azure-identity`, not by the ODBC driver.** This is not a
+style choice. The driver's browser-based auth is Windows-only: on macOS it
+accepts `Authentication=ActiveDirectoryInteractive` and then hangs until timeout,
+and it rejects `ActiveDirectoryDefault` and `ActiveDirectoryDeviceCode` outright
+as invalid values. So `data/loader.py` acquires the token in Python and passes it
+to the driver through the `SQL_COPT_SS_ACCESS_TOKEN` connection attribute, and
+the connection string carries no `Authentication=` at all.
 
-- The sign-in prompt appears on **the machine running the Python process**, not
-  in the user's browser tab. This works when you run Streamlit locally. It
-  cannot work on a headless/shared server — nobody is there to click. If you
-  deploy this app, switch `FABRIC_AUTH` to `ActiveDirectoryDefault` (reuses an
-  `az login` session or a managed identity) or `ActiveDirectoryDeviceCode`.
-- You will be prompted at most **once per day**: results are written to
-  `data/cache/contract_lines.parquet` and reused for 24 hours.
+`FABRIC_AUTH` therefore takes *azure-identity* mode names, not ODBC ones:
+
+| Mode | Prompt | Use for |
+|---|---|---|
+| `devicecode` (default) | URL + code, printed to the terminal | local dev, headless, SSH |
+| `interactivebrowser` | browser popup on this machine | local dev with a GUI |
+| `serviceprincipal` | none | deployment (see below) |
+| `default` | none | managed identity / `az login` |
+
+The old ODBC names (`ActiveDirectoryInteractive`, etc.) are accepted as aliases
+and mapped to the equivalent above, so an older `.env` keeps working.
+
+**You sign in about once a month, not once per run.** The first sign-in writes
+`data/cache/auth_record.json` and caches a refresh token in the OS keychain;
+after that the token is fetched silently. Query results are additionally cached
+in `data/cache/contract_lines.parquet` for 24 hours.
+
+> **Deployment:** `devicecode` and `interactivebrowser` both need a human. A
+> headless host (Streamlit Cloud, a container) must use `serviceprincipal`, which
+> requires `FABRIC_TENANT_ID`, `FABRIC_CLIENT_ID` and `FABRIC_CLIENT_SECRET`.
+> That secret must **not** go in `.env` while this file is tracked in git — use
+> the host's secret store, or untrack `.env` first.
 
 ---
 

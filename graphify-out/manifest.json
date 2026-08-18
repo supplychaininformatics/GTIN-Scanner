@@ -4,11 +4,6 @@
     "ast_hash": "49c0bfe59ceabccab0ed0470527731cd",
     "semantic_hash": ""
   },
-  ".claude/settings.local.json": {
-    "mtime": 1784058805.2652917,
-    "ast_hash": "4ebb085dee84c1f6736bf64995534718",
-    "semantic_hash": ""
-  },
   "api/__init__.py": {
     "mtime": 1781116841.1809113,
     "ast_hash": "5929ffa823b87febf5e9b9c69b5a6ce5",
@@ -20,8 +15,8 @@
     "semantic_hash": ""
   },
   "app.py": {
-    "mtime": 1785858937.0572538,
-    "ast_hash": "472f4026a7340c752d0aef3e1020a20b",
+    "mtime": 1787073004.251537,
+    "ast_hash": "73d60d98aafc5ae297b85dea7cb6d72d",
     "semantic_hash": ""
   },
   "core/__init__.py": {
@@ -40,8 +35,8 @@
     "semantic_hash": ""
   },
   "core/lookup.py": {
-    "mtime": 1785868862.5725348,
-    "ast_hash": "b7b8d6f299ad3c0a26d915d80835f1ef",
+    "mtime": 1786145675.8805413,
+    "ast_hash": "8749528af0d41092837a6eb0b056a4cd",
     "semantic_hash": ""
   },
   "core/session.py": {
@@ -60,8 +55,8 @@
     "semantic_hash": ""
   },
   "data/loader.py": {
-    "mtime": 1785431415.4958646,
-    "ast_hash": "8d3fb08f9b2015edf2bd92ec1e2d3446",
+    "mtime": 1786148268.13267,
+    "ast_hash": "2f76b1d9dcc194bd29f9ba4a52820452",
     "semantic_hash": ""
   },
   "engine/__init__.py": {
@@ -70,8 +65,8 @@
     "semantic_hash": ""
   },
   "engine/lookup.py": {
-    "mtime": 1785868916.3796751,
-    "ast_hash": "4c8787ab4cf734ae0c451dce00cce0a4",
+    "mtime": 1786395275.0068548,
+    "ast_hash": "67d3687bda241c8d8cb8d660b3dd5498",
     "semantic_hash": ""
   },
   "migrations/001_initial.sql": {
@@ -90,8 +85,8 @@
     "semantic_hash": ""
   },
   "pyproject.toml": {
-    "mtime": 1785854832.900282,
-    "ast_hash": "5137c132c899fd593c50e93d5ad6e13f",
+    "mtime": 1786125405.9133086,
+    "ast_hash": "3164222e12face7e15c4f08dc8b7920a",
     "semantic_hash": ""
   },
   "scripts/purge_expired.sql": {
@@ -105,13 +100,13 @@
     "semantic_hash": ""
   },
   "ui/components.py": {
-    "mtime": 1785870281.095586,
-    "ast_hash": "2b7e57c988922887275a6be853a26b59",
+    "mtime": 1786395288.9531164,
+    "ast_hash": "d1577aac59ced5fe843cc518501b7ac4",
     "semantic_hash": ""
   },
   "ui/theme.py": {
-    "mtime": 1785870414.7705219,
-    "ast_hash": "f878afcb7065427dd9c001b7fb4ef8cc",
+    "mtime": 1786125072.311955,
+    "ast_hash": "38e973182c6f46e940127c6bb3e47779",
     "semantic_hash": ""
   },
   ".github/workflows/purge-expired.yml": {
@@ -125,8 +120,8 @@
     "semantic_hash": ""
   },
   "FABRIC_TODO.md": {
-    "mtime": 1784139573.5674264,
-    "ast_hash": "4cb7770ea36bb02ca5c190d86aadf5b2",
+    "mtime": 1786145719.1196904,
+    "ast_hash": "a9720fb814f8b3585a7b027332ddd0de",
     "semantic_hash": ""
   },
   "PLAN.md": {
@@ -135,8 +130,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1785868862.5721548,
-    "ast_hash": "c3cf90af5e44d14f89db0cf75913f90a",
+    "mtime": 1786145214.2908418,
+    "ast_hash": "f892702d67c4bf0acd1555dd3081819c",
     "semantic_hash": ""
   },
   "requirements.txt": {
@@ -155,8 +150,18 @@
     "semantic_hash": ""
   },
   "migrations/002_miss_reason.sql": {
-    "mtime": 1785868644.058989,
-    "ast_hash": "928b6ebd844e1e72309a00dc44b5650c",
+    "mtime": 1786395318.0255857,
+    "ast_hash": "2e1bb1968941e561e7d988e50165f32a",
+    "semantic_hash": ""
+  },
+  "migrations/003_no_contract_line.sql": {
+    "mtime": 1786395310.8299096,
+    "ast_hash": "6b0e520d748d99362d9e735f1ce11785",
+    "semantic_hash": ""
+  },
+  "scripts/build_mock_dataset.py": {
+    "mtime": 1787071523.1178894,
+    "ast_hash": "0013c2656d18825814716b4183367b88",
     "semantic_hash": ""
   }
 }

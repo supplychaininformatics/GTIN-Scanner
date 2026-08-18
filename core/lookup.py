@@ -80,6 +80,23 @@ def _field(record: dict, key: str) -> str:
     return text or _MISSING
 
 
+def _field_any(record: dict, *keys: str) -> str:
+    """First of `keys` that has a real value, else "-".
+
+    Exists for fields whose source column differs between data sources rather
+    than being merely blank: the Fabric lakehouse supplies a readable
+    `manufacturer_name` ("MOLNLYCKE HEALTH CARE US INC"), while the mock
+    datasets predate that column and only carry `manufacturer_code` ("MOLN").
+    Preferring the name and falling back to the code keeps both sources
+    rendering something useful without either one special-casing the other.
+    """
+    for key in keys:
+        value = _field(record, key)
+        if value != _MISSING:
+            return value
+    return _MISSING
+
+
 def extract_gtin(scanned_code: str) -> str:
     """Extract a 14-digit GTIN from a composite GS1 barcode."""
     code = scanned_code.strip()
@@ -119,7 +136,7 @@ def resolve_scan(
         full_record = {
             "Scan": raw_gtin,
             "Item": _field(record, "vendor_item"),
-            "Company": _field(record, "manufacturer_code"),
+            "Company": _field_any(record, "manufacturer_name", "manufacturer_code"),
             "Brand": _field(record, "manufacturer_number"),
             "Description": " ".join(
                 str(x)

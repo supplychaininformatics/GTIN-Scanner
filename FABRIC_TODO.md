@@ -1,56 +1,43 @@
 # Fabric Lakehouse Migration — Open Items
 
-Tracked separately from the README because these are unresolved questions
-about the data model, not settled setup steps. The app currently runs on
-`DATA_SOURCE=mock` — none of these block local development or demos.
+The three schema questions that blocked `DATA_SOURCE=fabric` were resolved on
+2026-08-07 against the live lakehouse. What remains is listed at the bottom.
 
-Resolve an item, then update `data/loader.py` accordingly and delete that
-section here.
+## Resolved
 
-## 1. `manuf_name` → "Brand" mapping is a guess
+**1. `manuf_name` → "Brand" was the wrong column.** The right one is
+`manuf_item`, which matches the old Redshift `manufacturer_number` on 100% of
+~400k comparable rows (checked against the retained mock dataset).
+`manuf_name` is a readable *company* name ("INTUITIVE SURGICAL INC") and is 1:1
+with `manuf_code` ("INTU") — 2,103 distinct values each — so it was never a
+brand or a part number. `_LAKEHOUSE_COLUMN_MAP` now uses `manuf_item`.
 
-`_LAKEHOUSE_COLUMN_MAP` in `data/loader.py` maps the lakehouse column
-`manuf_name` to the app's internal `manufacturer_number`, which `core/lookup.py`
-labels **"Brand"** in the UI. That mapping is a positional guess — `manuf_name`
-sits in the same slot the old Redshift column `manufacturer_number` occupied,
-but the name itself suggests it might actually be a readable manufacturer
-*name*, which would fit better under **"Company"** (currently fed by
-`manuf_code`).
+**2. `low_uom_code_gtin` exists as `base_uom_gtin`.** Also a 100% match against
+the mock dataset. Added to the query and mapped back, so
+`engine.LookupEngine`'s inner-pack alias works again with no change to the
+engine. Verified: 5/5 sampled inner-pack barcodes resolve to the correct item.
+Present on 21,616 active lines — and some items have *only* an inner-pack
+barcode (blank `gtin`), so they were previously unreachable by any scan.
 
-**To resolve:** pull a few real rows from `[Silver_Lake].[infor].[contract_line]`
-and check what `manuf_name` actually contains — a brand/product line (e.g.
-"Biogel") supports the current mapping; a company name (e.g. "Mölnlycke
-Health Care") means it should swap with `manuf_code`. Update
-`_LAKEHOUSE_COLUMN_MAP` accordingly.
+**3. The active-line filter is `WHERE active = 1`.** The lakehouse equivalent
+of the old `contract_line_state = 2`. Restores pre-migration behaviour: an
+inactive line does not resolve, so scanning a discontinued item reports
+"Not Found". Cuts 176,296 rows to 157,658 (10.6% excluded).
 
-## 2. No lakehouse column for `low_uom_code_gtin`
+**4. "Company" now shows the readable vendor name.** `manuf_name` is mapped to
+its own `manufacturer_name` field and feeds Company, so a scan shows
+"INTUITIVE SURGICAL INC" rather than "INTU". The mock datasets predate that
+column, so `core/lookup.py:_field_any` prefers the name and falls back to
+`manufacturer_code` — neither data source special-cases the other.
 
-The old Redshift query selected a second GTIN column, `low_uom_code_gtin`,
-which `engine/lookup.py` (`LookupEngine.__init__`) used to alias the
-inner-pack/each-level barcode to the same contract line as the case-level
-barcode — a worker could scan either the box or an individual unit inside it
-and both resolved correctly.
+## Still open
 
-The new query has no equivalent column. **Inner-pack barcode scans will
-silently show "Not Found"** — this is a real feature regression, not a
-cosmetic gap, and won't surface until someone actually scans an each-level
-barcode.
+**B. Brand means two different things depending on the source.** The lakehouse
+path fills "Brand" from a manufacturer part number (`470179`), while the
+AccessGUDID fallback in `core/lookup.py` fills the same field from a real
+`brandName`. This mismatch predates the migration; it is now just easier to see.
 
-**To resolve:** find out whether Infor tracks a separate each-level GTIN
-anywhere under `[Silver_Lake].[infor]` (possibly a different table/view). If
-one exists, add it to the `SELECT` list in `_SQL_TEMPLATE` and rename it back
-to `low_uom_code_gtin` in `_LAKEHOUSE_COLUMN_MAP` — `engine/lookup.py` needs
-no other changes to pick it back up.
-
-## 3. Active-line filter (`WHERE contract_line_state = 2`) was dropped
-
-The old Redshift query filtered to `contract_line_state = 2` (active lines
-only). `[Silver_Lake].[infor].[contract_line]` has no obvious equivalent
-column, so the current query in `data/loader.py` is **unfiltered** — it
-returns every contract line, including whatever the old filter used to
-exclude (inactive, historical, or discontinued lines, if that's what state 2
-meant).
-
-**To resolve:** confirm with whoever owns the Infor/Fabric data model whether
-an equivalent filter is needed, and if so, add a `WHERE` clause to
-`_SQL_TEMPLATE` once the right column is identified.
+**C. Deployment auth is unsolved.** `devicecode` needs a human, so it cannot
+work on Streamlit Cloud. That needs a service principal — see README →
+"Switching to the Fabric Lakehouse" → step 4, and note that `.env` is currently
+tracked in git.
