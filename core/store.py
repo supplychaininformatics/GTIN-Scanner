@@ -52,6 +52,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from . import secrets
+
 logger = logging.getLogger(__name__)
 
 STATUS_ACTIVE = "active"
@@ -130,14 +132,20 @@ _pool_lock = threading.Lock()
 
 
 def _conninfo() -> str:
-    """The Neon connection string, from the environment or Streamlit secrets.
+    """The Neon connection string: env var, then OS keychain, then Streamlit
+    secrets — see core/secrets.py for why that order and what each source is
+    for.
 
     Environment first so the same module works unchanged in a script, a test
-    or CI, where there is no Streamlit runtime to read secrets from. streamlit
-    is imported lazily for that same reason — importing this module must not
-    require it.
+    or CI, where there is no Streamlit runtime to read secrets from and no
+    interactive OS session to hold a keychain. streamlit is imported lazily
+    for that same reason — importing this module must not require it.
     """
-    url = os.environ.get("NEON_DATABASE_URL") or os.environ.get("DATABASE_URL")
+    url = (
+        os.environ.get("NEON_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or secrets.from_keyring("neon_database_url")
+    )
     if not url:
         try:
             import streamlit as st  # noqa: PLC0415
@@ -145,7 +153,8 @@ def _conninfo() -> str:
             url = str(st.secrets["neon"]["url"])
         except Exception as exc:  # noqa: BLE001 — any failure here means the same thing
             raise RuntimeError(
-                "No database connection string. Set NEON_DATABASE_URL, or add a "
+                "No database connection string. Set NEON_DATABASE_URL, store it "
+                "in the OS keychain (see scripts/store_secret.py), or add a "
                 "[neon] url = ... entry to .streamlit/secrets.toml "
                 "(see .streamlit/secrets.toml.example)."
             ) from exc

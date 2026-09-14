@@ -312,19 +312,30 @@ def _fabric_credential():
             authentication_record=record,
         )
     if mode == "serviceprincipal":
+        # Tenant/client id are identifiers, not secrets — env-only is fine for
+        # those. The client *secret* gets the same layered lookup as the Neon
+        # connection string (env var, then OS keychain) before falling back to
+        # requiring it in .env — see core/secrets.py.
+        from core.secrets import from_keyring  # noqa: PLC0415
+
+        client_secret = os.getenv("FABRIC_CLIENT_SECRET", "").strip() or from_keyring(
+            "fabric_client_secret"
+        )
         missing = [
             var
-            for var in ("FABRIC_TENANT_ID", "FABRIC_CLIENT_ID", "FABRIC_CLIENT_SECRET")
+            for var in ("FABRIC_TENANT_ID", "FABRIC_CLIENT_ID")
             if not os.getenv(var, "").strip()
         ]
+        if not client_secret:
+            missing.append("FABRIC_CLIENT_SECRET (env or keychain)")
         if missing:
             raise RuntimeError(
-                f"FABRIC_AUTH=serviceprincipal requires {', '.join(missing)} in .env."
+                f"FABRIC_AUTH=serviceprincipal requires {', '.join(missing)}."
             )
         return ClientSecretCredential(
             tenant_id=os.environ["FABRIC_TENANT_ID"],
             client_id=os.environ["FABRIC_CLIENT_ID"],
-            client_secret=os.environ["FABRIC_CLIENT_SECRET"],
+            client_secret=client_secret,
         )
     if mode == "default":
         return DefaultAzureCredential()

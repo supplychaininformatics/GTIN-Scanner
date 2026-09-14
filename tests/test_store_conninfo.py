@@ -31,3 +31,13 @@ def test_database_url_env_var_also_enforced(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@host/db?sslmode=disable")
     with pytest.raises(RuntimeError, match="sslmode"):
         store._conninfo()
+
+
+def test_keyring_is_preferred_over_streamlit_secrets(monkeypatch):
+    """env var absent, keychain has a value -> keychain wins without ever
+    touching st.secrets (which isn't even importable in this test)."""
+    monkeypatch.delenv("NEON_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    keychain_url = "postgresql://user:pass@keychain-host/db?sslmode=require"
+    monkeypatch.setattr(store.secrets, "from_keyring", lambda key: keychain_url)
+    assert store._conninfo() == keychain_url
