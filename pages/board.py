@@ -21,7 +21,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from core import store
-from core.admin import log_audit_event
+from core.admin import log_audit_event, render_access_gate
 from core.export import EXPORT_MIME, build_workbook, export_filename
 from core.session import history_for_session
 from ui import components as C
@@ -42,9 +42,20 @@ st.set_page_config(
 )
 
 inject_theme()
-store.purge_old_sessions()
 
 st.markdown(C.identity_header_html(page_name="Monitor Board"), unsafe_allow_html=True)
+
+# Gated: this board shows every picker's Sanford ID and scan history across
+# the retention window, and its Force End is a destructive action against
+# another device's in-progress session — both need to be behind the same
+# typed-email check the admin page uses, not open to anyone with the URL.
+# See core/admin.render_access_gate and ASVS-AUDIT.md finding #1.
+board_email = render_access_gate("Monitor Board")
+if board_email is None:
+    st.stop()
+
+store.purge_old_sessions()
+
 with st.container(key="sf_navlink"):
     st.page_link("pages/admin.py", label="Admin Tools →", icon=None)
 
@@ -145,7 +156,7 @@ with action_col:
         if ok:
             log_audit_event(
                 "force_end_session",
-                "monitor-board",
+                board_email,
                 session_id=selected_id,
                 sanford_id=selected.get("sanford_id"),
             )

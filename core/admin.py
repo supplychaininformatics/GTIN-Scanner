@@ -35,6 +35,10 @@ from .lookup import get_lookup_engine
 
 logger = logging.getLogger(__name__)
 
+# Shared across every gated page (admin, board) so a supervisor who has
+# already typed their email on one doesn't have to do it again on the other.
+_SESSION_KEY = "admin_email"
+
 # How long "Refresh data now" stays disabled after a successful refresh. Keeps
 # a well-meaning admin (or several, in different tabs) from re-triggering a
 # full dataset fetch — and on Fabric, a fresh ODBC round-trip — back to back.
@@ -175,3 +179,51 @@ def refresh_now(email: str) -> int:
     log_audit_event("refresh", email, rows=engine.size)
     logger.info("Manual data refresh by %s: %d contract lines loaded.", email, engine.size)
     return engine.size
+
+
+def render_access_gate(page_label: str) -> str | None:
+    """Render the typed-email allowlist gate; return the verified email once
+    granted, else render the sign-in form and return None.
+
+    Callers must treat a None return as "stop rendering the rest of the
+    page" (e.g. `st.stop()`) — this function only draws the form, it does
+    not halt execution itself, since Streamlit pages need to keep control
+    of their own layout (nav links above the gate, etc.).
+
+    Session state key is shared (`admin_email`) across every page that calls
+    this, so verifying on the admin page also unlocks the monitor board and
+    vice versa — one sign-in per browser session, not per page. See
+    core/admin.py's module docstring for why this is a typed-email allowlist
+    rather than a verified login, and its limits.
+    """
+    if _SESSION_KEY not in st.session_state:
+        st.session_state[_SESSION_KEY] = None
+
+    if st.session_state[_SESSION_KEY]:
+        return st.session_state[_SESSION_KEY]
+
+    st.markdown(f"### {page_label} Access")
+    st.write(
+        "This page is restricted to managers and supervisors. Enter your "
+        "email to continue — every attempt is logged."
+    )
+    with st.form(f"{page_label.lower().replace(' ', '_')}_access_form"):
+        typed_email = st.text_input(
+            "Email", placeholder="you@example.org", label_visibility="collapsed"
+        )
+        submitted = st.form_submit_button("Continue", type="primary")
+
+    if submitted:
+        candidate = typed_email.strip()
+        if candidate and is_admin(candidate):
+            log_audit_event("access_granted", candidate, page=page_label)
+            st.session_state[_SESSION_KEY] = candidate.lower()
+            st.rerun()
+        else:
+            log_audit_event("access_denied", candidate, page=page_label)
+            st.error(
+                "That email isn't on the admin allowlist. Ask Supply Chain "
+                "Informatics to add you to allowed emails (or your group's "
+                "domain to allowed emails)."
+            )
+    return None

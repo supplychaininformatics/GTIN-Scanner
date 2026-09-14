@@ -33,11 +33,11 @@ from dotenv import load_dotenv
 from core import store
 from core.admin import (
     cooldown_remaining,
-    is_admin,
     log_audit_event,
     read_audit_log,
     read_refresh_meta,
     refresh_now,
+    render_access_gate,
 )
 from core.lookup import get_lookup_engine
 from data.loader import CACHE_PATH
@@ -64,39 +64,12 @@ st.markdown(C.identity_header_html(page_name="Admin"), unsafe_allow_html=True)
 with st.container(key="sf_navlink"):
     st.page_link("pages/board.py", label="← Monitor Board", icon=None)
 
-if "admin_email" not in st.session_state:
-    st.session_state.admin_email = None
-
-# ── Not yet verified this session ───────────────────────────────────────────
-if not st.session_state.admin_email:
-    st.markdown(C.section_html("Admin Access"), unsafe_allow_html=True)
-    st.write(
-        "This page is restricted to managers and supervisors. Enter your "
-        "email to continue — every attempt is logged."
-    )
-    with st.form("admin_email_form"):
-        typed_email = st.text_input(
-            "Email", placeholder="you@example.org", label_visibility="collapsed"
-        )
-        submitted = st.form_submit_button("Continue", type="primary")
-
-    if submitted:
-        candidate = typed_email.strip()
-        if candidate and is_admin(candidate):
-            log_audit_event("access_granted", candidate)
-            st.session_state.admin_email = candidate.lower()
-            st.rerun()
-        else:
-            log_audit_event("access_denied", candidate)
-            st.error(
-                "That email isn't on the admin allowlist. Ask Supply Chain "
-                "Informatics to add you to allowed emails (or your group's "
-                "domain to allowed emails)."
-            )
+email = render_access_gate("Admin")
 
 # ── Verified this session ───────────────────────────────────────────────────
+if email is None:
+    st.stop()
 else:
-    email = st.session_state.admin_email
     st.markdown(C.section_html("Data Refresh"), unsafe_allow_html=True)
     st.caption(f"Continuing as {email}")
 
