@@ -167,6 +167,16 @@ def _fabric_connection_string() -> str:
     database = os.environ["FABRIC_DATABASE"]
     driver = os.getenv("FABRIC_ODBC_DRIVER", DEFAULT_ODBC_DRIVER)
 
+    # Egress allowlist chokepoint (see core.egress): FABRIC_SQL_ENDPOINT is
+    # itself one of the allowed hosts by construction, so this can't reject a
+    # correctly configured endpoint — its value is catching a malformed one
+    # (empty, or accidentally carrying a scheme/path/port) before it reaches
+    # the driver, and keeping this connection's destination in the same
+    # single audited allowlist as GUDID/Neon rather than trusted implicitly.
+    from core.egress import assert_allowed_host  # noqa: PLC0415
+
+    assert_allowed_host(server)
+
     return (
         f"Driver={{{driver}}};"
         f"Server={server},1433;"

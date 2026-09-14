@@ -138,18 +138,33 @@ def _conninfo() -> str:
     require it.
     """
     url = os.environ.get("NEON_DATABASE_URL") or os.environ.get("DATABASE_URL")
-    if url:
-        return url
-    try:
-        import streamlit as st  # noqa: PLC0415
+    if not url:
+        try:
+            import streamlit as st  # noqa: PLC0415
 
-        return str(st.secrets["neon"]["url"])
-    except Exception as exc:  # noqa: BLE001 — any failure here means the same thing
+            url = str(st.secrets["neon"]["url"])
+        except Exception as exc:  # noqa: BLE001 — any failure here means the same thing
+            raise RuntimeError(
+                "No database connection string. Set NEON_DATABASE_URL, or add a "
+                "[neon] url = ... entry to .streamlit/secrets.toml "
+                "(see .streamlit/secrets.toml.example)."
+            ) from exc
+
+    # sslmode=require (+ channel_binding=require, when present) has to survive
+    # every copy/paste of this value between .env, Streamlit Cloud secrets and
+    # .streamlit/secrets.toml — nothing else in this module re-asserts TLS, so
+    # a connection string pasted from a different Neon tab without it would
+    # otherwise silently downgrade to an unencrypted session. Fail loudly
+    # instead. See ASVS-AUDIT.md finding #9 / ASVS-COMPLIANCE.md V9.
+    if "sslmode=require" not in url and "sslmode=verify-full" not in url:
         raise RuntimeError(
-            "No database connection string. Set NEON_DATABASE_URL, or add a "
-            "[neon] url = ... entry to .streamlit/secrets.toml "
-            "(see .streamlit/secrets.toml.example)."
-        ) from exc
+            "The Neon connection string does not require TLS "
+            "(missing sslmode=require). Refusing to connect — copy the "
+            "connection string from Neon's 'Pooled connection' tab, which "
+            "includes sslmode=require by default."
+        )
+
+    return url
 
 
 def _get_pool() -> ConnectionPool:

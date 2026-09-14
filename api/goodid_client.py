@@ -23,6 +23,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from core.egress import assert_allowed_url
+
 logger = logging.getLogger(__name__)
 
 _GUDID_LOOKUP_URL = "https://accessgudid.nlm.nih.gov/api/v2/devices/lookup.json"
@@ -65,12 +67,13 @@ def query_goodid(gtin: str) -> GoodIDResult:
     Example URL constructed:
         https://accessgudid.nlm.nih.gov/api/v2/devices/lookup.json?di=00841098765432
     """
-    url = f"{_GUDID_LOOKUP_URL}?di={gtin}"
+    url = _GUDID_LOOKUP_URL
+    assert_allowed_url(url)
     logger.info("AccessGUDID fallback query: GET %s", url)
 
     try:
         with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
-            resp = client.get(url)
+            resp = client.get(url, params={"di": gtin})
             resp.raise_for_status()
             payload = resp.json()
             logger.info("AccessGUDID returned HTTP %d for GTIN %s", resp.status_code, gtin)
