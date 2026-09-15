@@ -31,6 +31,7 @@ import streamlit as st
 from api import GoodIDResult, query_goodid
 from data import load_contract_data
 from engine import LookupEngine
+from engine.lookup import MISS_BAD_GTIN
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,35 @@ def resolve_scan(
     # evidence worth collecting, so miss_reason is recorded for API hits too,
     # not only for outright Not Found.
     miss = engine.diagnose(gtin)
+
+    # A scan that isn't a valid GTIN at all (fails normalize()/check-digit —
+    # see engine.gtin) never reaches the network: there is no legitimate
+    # lookup to make with it, it would just spend a timeout finding out GUDID
+    # doesn't recognise it either, and it's the one point in this pipeline
+    # where the raw scanned string is still otherwise unvalidated before
+    # leaving the process (URL query param, export file, log line). See
+    # ASVS-AUDIT.md finding #3.
+    if miss["reason"] == MISS_BAD_GTIN:
+        logger.info("Cache MISS for GTIN %s (%s) — not a valid GTIN, skipping API.", gtin, miss["detail"])
+        return {
+            "source": "invalid",
+            "gtin": gtin,
+            "time": ts,
+            "full_record": {
+                "Scan": raw_gtin,
+                "Item": "", "Company": "", "Brand": "", "Description": "",
+                "GTIN": gtin, "GTIN UOM": "", "UOU": "-", "HIBCC": "-",
+                "LAWSON ID": "-", "Lawson UOM": "-",
+            },
+            "on_hold": False,
+            "status_key": STATUS_NOT_FOUND,
+            "status_label": _LABEL_NOT_FOUND,
+            "source_label": "Invalid Barcode",
+            "miss_reason": miss["reason"],
+            "miss_label": miss["label"],
+            "miss_detail": miss["detail"],
+        }
+
     logger.info(
         "Cache MISS for GTIN %s (%s: %s) — querying goodID API.",
         gtin, miss["reason"], miss["detail"],

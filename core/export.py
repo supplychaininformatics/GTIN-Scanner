@@ -41,6 +41,28 @@ _COLUMNS = [
 
 _FILENAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
+# CSV/formula-injection guard (OWASP-style): a cell whose text starts with
+# one of these is a live formula to Excel (and to openpyxl's own writer —
+# confirmed empirically: a string starting with "=" is written as a real
+# <f> formula cell, not literal text, so this isn't just a CSV-reimport
+# heuristic). Every field in this export can carry attacker-influenced text
+# — the raw scan string, or the free-text Sanford ID / Warehouse Location
+# entered on the start form (see app.py) — so every one of them goes
+# through this before reaching the workbook. See ASVS-AUDIT.md finding #4.
+_FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _neutralize_formula(value: object) -> object:
+    """Prefix a leading formula-trigger character with `'` so Excel (and
+    openpyxl's writer) treats the cell as text.
+
+    Non-strings pass through untouched — a numeric Scan Count or an actual
+    NaN must not be stringified just to run through this check.
+    """
+    if not isinstance(value, str):
+        return value
+    return f"'{value}" if value.startswith(_FORMULA_TRIGGER_CHARS) else value
+
 
 def _filename_part(value: str | None, fallback: str) -> str:
     """Sanitise a value for use inside the export filename.
@@ -86,11 +108,17 @@ def build_workbook(
     df_export = pd.DataFrame(history)
     df_export = df_export[[c for c in _COLUMNS if c in df_export.columns]]
     if location:
-        df_export.insert(0, "Warehouse Location", location)
+        df_export.insert(0, "Warehouse Location", _neutralize_formula(location))
     if sanford_id:
-        df_export.insert(0, "Sanford Id/ Name", sanford_id)
+        df_export.insert(0, "Sanford Id/ Name", _neutralize_formula(sanford_id))
     if session_id:
-        df_export.insert(0, "Session ID", session_id)
+        df_export.insert(0, "Session ID", _neutralize_formula(session_id))
+
+    # Series.map (not DataFrame.map/applymap) so this works across both the
+    # pandas 2.x and 3.x that requirements.txt currently spans — applymap was
+    # removed in 3.0, DataFrame.map only exists from 2.1 on.
+    for col in df_export.columns:
+        df_export[col] = df_export[col].map(_neutralize_formula)
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
