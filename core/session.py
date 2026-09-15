@@ -27,6 +27,7 @@ from engine.lookup import MISS_LABELS
 
 from . import offline_queue, store
 from .connectivity import is_connectivity_error
+from .logsafe import safe_log_value
 from .lookup import STATUS_API, STATUS_CACHE, STATUS_HOLD, STATUS_NOT_FOUND
 
 logger = logging.getLogger(__name__)
@@ -304,7 +305,8 @@ def record_scan(result: dict) -> None:
         if not is_connectivity_error(exc):
             raise
         logger.warning(
-            "Neon unreachable recording scan %s; queuing.", result.get("gtin"), exc_info=True
+            "Neon unreachable recording scan %s; queuing.",
+            safe_log_value(result.get("gtin")), exc_info=True,
         )
         offline_queue.enqueue("record_scan", {"session_id": session_id, "result": result})
         entry = _entry_from_result(result, scan_count=1)
@@ -340,7 +342,9 @@ def record_duplicate_scan(raw_gtin: str, gtin: str, existing: dict) -> None:
     except Exception as exc:
         if not is_connectivity_error(exc):
             raise
-        logger.warning("Neon unreachable incrementing scan %s; queuing.", gtin, exc_info=True)
+        logger.warning(
+            "Neon unreachable incrementing scan %s; queuing.", safe_log_value(gtin), exc_info=True
+        )
         offline_queue.enqueue("increment_scan", {"session_id": session_id, "gtin": gtin})
         new_scan_count = int(existing.get("Scan Count") or 1) + 1
         updated_entry = {**existing, "Scan Count": new_scan_count, "pending_sync": True}

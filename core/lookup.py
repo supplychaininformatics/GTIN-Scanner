@@ -33,6 +33,8 @@ from data import load_contract_data
 from engine import LookupEngine
 from engine.lookup import MISS_BAD_GTIN
 
+from .logsafe import safe_log_value
+
 logger = logging.getLogger(__name__)
 
 _MISSING = "-"
@@ -133,7 +135,7 @@ def resolve_scan(
     record = engine.search(gtin)
 
     if record is not None:
-        logger.info("Cache HIT for GTIN %s", gtin)
+        logger.info("Cache HIT for GTIN %s", safe_log_value(gtin))
         full_record = {
             "Scan": raw_gtin,
             "Item": _field(record, "vendor_item"),
@@ -194,7 +196,10 @@ def resolve_scan(
     # leaving the process (URL query param, export file, log line). See
     # ASVS-AUDIT.md finding #3.
     if miss["reason"] == MISS_BAD_GTIN:
-        logger.info("Cache MISS for GTIN %s (%s) — not a valid GTIN, skipping API.", gtin, miss["detail"])
+        logger.info(
+            "Cache MISS for GTIN %s (%s) — not a valid GTIN, skipping API.",
+            safe_log_value(gtin), miss["detail"],
+        )
         return {
             "source": "invalid",
             "gtin": gtin,
@@ -216,7 +221,7 @@ def resolve_scan(
 
     logger.info(
         "Cache MISS for GTIN %s (%s: %s) — querying goodID API.",
-        gtin, miss["reason"], miss["detail"],
+        safe_log_value(gtin), miss["reason"], miss["detail"],
     )
     if before_api is not None:
         before_api()

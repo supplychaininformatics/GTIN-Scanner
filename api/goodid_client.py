@@ -109,8 +109,9 @@ def query_goodid(gtin: str) -> GoodIDResult:
     # `import api` before anything touches `core`). Deferring the import to
     # call time breaks that cycle; core.egress itself has no import-time
     # dependency on api, so this is safe regardless of who imports first.
-    from core.egress import assert_allowed_url  # noqa: PLC0415
     from core.circuit_breaker import CircuitOpenError  # noqa: PLC0415
+    from core.egress import assert_allowed_url  # noqa: PLC0415
+    from core.logsafe import safe_log_value  # noqa: PLC0415
 
     url = _GUDID_LOOKUP_URL
     assert_allowed_url(url)
@@ -131,7 +132,9 @@ def query_goodid(gtin: str) -> GoodIDResult:
                 resp = client.get(url, params={"di": gtin})
                 resp.raise_for_status()
                 payload = resp.json()
-                logger.info("AccessGUDID returned HTTP %d for GTIN %s", resp.status_code, gtin)
+                logger.info(
+                    "AccessGUDID returned HTTP %d for GTIN %s", resp.status_code, safe_log_value(gtin)
+                )
                 breaker.record_success()
                 return GoodIDResult(
                     success=True,

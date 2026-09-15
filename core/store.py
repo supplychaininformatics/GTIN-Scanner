@@ -47,6 +47,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
 import psycopg
 from psycopg.rows import dict_row
@@ -192,23 +193,37 @@ def _get_pool() -> ConnectionPool:
         # Re-checked inside the lock: another thread may have built it while
         # this one waited.
         if _pool is None:
-            _pool = ConnectionPool(
-                _conninfo(),
-                min_size=1,
-                # Small on purpose. Handhelds are read-light and write-tiny,
-                # and Neon's free tier is not somewhere to hoard connections.
-                max_size=5,
-                kwargs={"row_factory": dict_row},
-                # Neon scales its compute to zero when idle, which drops
-                # pooled connections without the pool noticing. check runs a
-                # liveness probe before handing one out, so the first scan
-                # after a quiet spell reconnects instead of raising.
-                check=ConnectionPool.check_connection,
-                max_idle=300,
-                timeout=20,
-                open=False,
-            )
-            _pool.open()
+            conninfo = _conninfo()
+            # Host only — never the full conninfo, which carries the
+            # password — so this line is safe to leave at INFO for IT to
+            # monitor the egress point (endpoint + outcome + the log
+            # formatter's own timestamp), per ASVS-AUDIT.md item 7.
+            host = urlparse(conninfo).hostname or "(unknown host)"
+            logger.info("Opening Neon connection pool to %s.", host)
+            try:
+                _pool = ConnectionPool(
+                    conninfo,
+                    min_size=1,
+                    # Small on purpose. Handhelds are read-light and
+                    # write-tiny, and Neon's free tier is not somewhere to
+                    # hoard connections.
+                    max_size=5,
+                    kwargs={"row_factory": dict_row},
+                    # Neon scales its compute to zero when idle, which drops
+                    # pooled connections without the pool noticing. check
+                    # runs a liveness probe before handing one out, so the
+                    # first scan after a quiet spell reconnects instead of
+                    # raising.
+                    check=ConnectionPool.check_connection,
+                    max_idle=300,
+                    timeout=20,
+                    open=False,
+                )
+                _pool.open()
+            except Exception:
+                logger.error("Failed to open Neon connection pool to %s.", host, exc_info=True)
+                raise
+            logger.info("Neon connection pool to %s is open.", host)
             # The pool's worker threads are not daemons, so without an
             # explicit close the interpreter blocks on each of them at
             # shutdown and logs a "couldn't stop thread" warning per thread
