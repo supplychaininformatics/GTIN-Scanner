@@ -19,7 +19,11 @@ def _isolated_queue(tmp_path, monkeypatch):
     monkeypatch.setattr(offline_queue, "_QUEUE_PATH", tmp_path / "pending_writes.enc")
     monkeypatch.setattr(offline_queue, "_FALLBACK_KEY_PATH", tmp_path / ".offline_queue_key")
     monkeypatch.setattr(offline_queue.secrets, "from_keyring", lambda key: None)
-    monkeypatch.setattr(offline_queue.secrets, "store_in_keyring", lambda key, value: (_ for _ in ()).throw(RuntimeError("no keychain in tests")))
+
+    def _no_keyring(key, value):
+        raise RuntimeError("no keychain in tests")
+
+    monkeypatch.setattr(offline_queue.secrets, "store_in_keyring", _no_keyring)
     monkeypatch.setattr(offline_queue, "_last_flush_attempt", 0.0)
     yield
 
@@ -31,7 +35,9 @@ def test_enqueue_then_pending_count():
 
 
 def test_queue_file_is_encrypted_at_rest():
-    offline_queue.enqueue("record_scan", {"session_id": "abc", "result": {"gtin": "00801741030024"}})
+    offline_queue.enqueue(
+        "record_scan", {"session_id": "abc", "result": {"gtin": "00801741030024"}}
+    )
     raw_bytes = offline_queue._QUEUE_PATH.read_bytes()
     # The GTIN and session id must not appear in plaintext on disk, and the
     # file must not itself parse as JSON (i.e. it really is encrypted, not

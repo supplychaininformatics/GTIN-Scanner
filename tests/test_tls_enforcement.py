@@ -31,7 +31,8 @@ _DANGEROUS_PATTERNS = re.compile(
 def test_no_disabled_tls_verification_in_source(module):
     source = inspect.getsource(module)
     match = _DANGEROUS_PATTERNS.search(source)
-    assert match is None, f"Found disabled-TLS pattern {match.group() if match else ''!r} in {module.__name__}"
+    found = match.group() if match else ""
+    assert match is None, f"Found disabled-TLS pattern {found!r} in {module.__name__}"
 
 
 def test_httpx_client_created_with_no_verify_override():

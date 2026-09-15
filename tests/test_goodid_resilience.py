@@ -15,7 +15,8 @@ def _fresh_breaker(monkeypatch):
     """Each test gets its own breaker instance, not the process-wide
     singleton, so tests can't leak open/closed state between each other."""
     monkeypatch.setattr(goodid_client, "_breaker", None)
-    monkeypatch.setattr(goodid_client.time, "sleep", lambda seconds: None)  # no real waiting in tests
+    # No real waiting in tests.
+    monkeypatch.setattr(goodid_client.time, "sleep", lambda seconds: None)
     yield
 
 
@@ -72,13 +73,16 @@ def test_http_error_response_does_not_retry(monkeypatch):
 
     assert result.success is False
     assert len(calls) == 1
-    assert not goodid_client._get_breaker().is_open, "an HTTP error response must not trip the breaker"
+    assert not goodid_client._get_breaker().is_open, (
+        "an HTTP error response must not trip the breaker"
+    )
 
 
 def test_breaker_opens_after_repeated_connectivity_failures(monkeypatch):
-    monkeypatch.setattr(
-        httpx.Client, "get", lambda self, url, params=None: (_ for _ in ()).throw(httpx.ConnectError("refused"))
-    )
+    def _refused(self, url, params=None):
+        raise httpx.ConnectError("refused")
+
+    monkeypatch.setattr(httpx.Client, "get", _refused)
     for _ in range(3):
         goodid_client.query_goodid("00801741030024")
 

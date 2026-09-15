@@ -155,7 +155,8 @@ def _kpi_chip_html(stats: dict[str, int]) -> str:
         value = stats.get(key, 0)
         out.append(
             f'<div class="sf-chip"><span class="sf-chip-k">{label}</span>'
-            f'<span class="sf-chip-v" data-sf-key="{key}" data-sf-val="{value}">{value}</span></div>'
+            f'<span class="sf-chip-v" data-sf-key="{key}" '
+            f'data-sf-val="{value}">{value}</span></div>'
         )
     return f'<div class="sf-kpi-grid">{"".join(out)}</div>'
 

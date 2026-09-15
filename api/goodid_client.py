@@ -121,7 +121,9 @@ def query_goodid(gtin: str) -> GoodIDResult:
         breaker.before_call()
     except CircuitOpenError as exc:
         logger.warning(str(exc))
-        return GoodIDResult(success=False, gtin=gtin, payload={}, status_code=None, error_message=str(exc))
+        return GoodIDResult(
+            success=False, gtin=gtin, payload={}, status_code=None, error_message=str(exc)
+        )
 
     logger.info("AccessGUDID fallback query: GET %s", url)
 
@@ -133,7 +135,8 @@ def query_goodid(gtin: str) -> GoodIDResult:
                 resp.raise_for_status()
                 payload = resp.json()
                 logger.info(
-                    "AccessGUDID returned HTTP %d for GTIN %s", resp.status_code, safe_log_value(gtin)
+                    "AccessGUDID returned HTTP %d for GTIN %s",
+                    resp.status_code, safe_log_value(gtin),
                 )
                 breaker.record_success()
                 return GoodIDResult(
