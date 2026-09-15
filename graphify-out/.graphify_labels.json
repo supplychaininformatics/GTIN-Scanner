@@ -1,14 +1,22 @@
 {
-  "0": "core/lookup.py",
+  "0": "core/admin.py",
   "1": "store.py",
   "2": "components.py",
-  "3": "app.py",
+  "3": "session.py",
   "4": "GTIN Barcode Scanner",
   "5": "loader.py",
   "6": "board.py",
   "7": "GTIN Scanner — Handheld + Monitor Two-Surface Plan",
-  "8": "LookupEngine",
+  "8": "test_gtin_validation.py",
   "9": "CLAUDE.md",
   "10": "gtin-scanner",
-  "11": "build"
+  "11": "build",
+  "12": "_conninfo",
+  "13": "enqueue",
+  "14": "CircuitBreaker",
+  "15": "ASVS Security Audit — GTIN Barcode Scanner",
+  "16": "query_goodid",
+  "17": "from_keyring",
+  "18": "conftest.py",
+  "19": "tests/__init__.py"
 }
