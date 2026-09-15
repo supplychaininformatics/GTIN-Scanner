@@ -28,9 +28,11 @@ import logging
 import time
 
 import streamlit as st
+from cryptography.fernet import Fernet, InvalidToken
 
 from data.loader import CACHE_PATH, invalidate_data_cache
 
+from . import secrets
 from .lookup import get_lookup_engine
 
 logger = logging.getLogger(__name__)
@@ -44,17 +46,77 @@ _SESSION_KEY = "admin_email"
 # full dataset fetch — and on Fabric, a fresh ODBC round-trip — back to back.
 ADMIN_COOLDOWN_SECONDS = 300
 
-# Sidecar JSON recording who last refreshed and when. Lives next to the
-# Parquet cache (data/cache/), which is already git-ignored, and is the
-# source of truth for both the banner and the cooldown — st.session_state
-# would only be visible to the admin who clicked, not to a second admin in a
-# different session, so the cooldown would be trivially bypassable without it.
-_META_PATH = CACHE_PATH.parent / "refresh_meta.json"
+# Sidecar recording who last refreshed and when. Lives next to the Parquet
+# cache (data/cache/), which is already git-ignored, and is the source of
+# truth for both the banner and the cooldown — st.session_state would only
+# be visible to the admin who clicked, not to a second admin in a different
+# session, so the cooldown would be trivially bypassable without it.
+#
+# Encrypted at rest (Fernet, same keychain-backed pattern as
+# core/offline_queue.py and data/loader.py's contract cache) — this file
+# records admin email addresses and refresh timestamps, which shouldn't sit
+# in plaintext on the server's disk any more than the other cached state
+# does. See ASVS-AUDIT.md finding #13.
+_META_PATH = CACHE_PATH.parent / "refresh_meta.enc"
 
-# Append-only audit trail (JSON Lines — one compact record per line) of every
-# access attempt and refresh. Same directory as the meta sidecar, same
-# git-ignore coverage.
-_AUDIT_LOG_PATH = CACHE_PATH.parent / "admin_audit.log"
+# Audit trail of every access attempt and refresh, stored as one encrypted
+# JSON array rather than append-only JSON Lines — whole-file encryption
+# means "append" is decrypt/add/re-encrypt, which is the right tradeoff for
+# a low-volume admin log, not a high-throughput one. Capped at
+# _AUDIT_LOG_MAX_RECORDS so it can't grow unbounded either.
+_AUDIT_LOG_PATH = CACHE_PATH.parent / "admin_audit.enc"
+_AUDIT_LOG_MAX_RECORDS = 2000
+
+_KEYRING_KEY_NAME = "admin_log_key"
+_FALLBACK_KEY_PATH = CACHE_PATH.parent / ".admin_log_key"
+
+
+def _log_key() -> bytes:
+    """Fernet key for the audit log / refresh-meta files — OS keychain
+    first, a local 0600 key file only if no keyring backend exists at all.
+    Same pattern as core.offline_queue._get_or_create_key and
+    data.loader._cache_key."""
+    existing = secrets.from_keyring(_KEYRING_KEY_NAME)
+    if existing:
+        return existing.encode()
+
+    key = Fernet.generate_key()
+    try:
+        secrets.store_in_keyring(_KEYRING_KEY_NAME, key.decode())
+        return key
+    except Exception:  # noqa: BLE001 — no keyring backend; use the file fallback
+        logger.warning(
+            "No OS keychain backend available; falling back to a local key "
+            "file for the admin audit log."
+        )
+    if _FALLBACK_KEY_PATH.exists():
+        return _FALLBACK_KEY_PATH.read_bytes()
+    _FALLBACK_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _FALLBACK_KEY_PATH.write_bytes(key)
+    _FALLBACK_KEY_PATH.chmod(0o600)
+    return key
+
+
+def _write_encrypted(path, data) -> None:
+    token = Fernet(_log_key()).encrypt(json.dumps(data).encode())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    tmp_path.write_bytes(token)
+    tmp_path.replace(path)
+
+
+def _read_encrypted(path, default):
+    """Decrypt and parse `path`, or return `default` on any failure (missing
+    file, wrong/rotated key, corrupted write) — a lost audit-log entry is a
+    cost, never a reason to break the page it's watching."""
+    if not path.exists():
+        return default
+    try:
+        raw = Fernet(_log_key()).decrypt(path.read_bytes())
+        return json.loads(raw)
+    except (InvalidToken, OSError, ValueError, json.JSONDecodeError):
+        logger.warning("%s is unreadable; treating it as absent.", path.name, exc_info=True)
+        return default
 
 
 def _allowed_emails() -> frozenset[str]:
@@ -93,7 +155,7 @@ def is_admin(email: str) -> bool:
 
 
 def log_audit_event(event: str, email: str, **extra: object) -> None:
-    """Append one record to the admin audit log.
+    """Append one record to the (encrypted) admin audit log.
 
     `event` is a short label — "access_granted", "access_denied", "refresh".
     Logging failures are swallowed (beyond a warning): the audit trail must
@@ -106,46 +168,33 @@ def log_audit_event(event: str, email: str, **extra: object) -> None:
         **extra,
     }
     try:
-        _AUDIT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _AUDIT_LOG_PATH.open("a") as f:
-            f.write(json.dumps(record) + "\n")
+        records = _read_encrypted(_AUDIT_LOG_PATH, default=[])
+        if not isinstance(records, list):
+            records = []
+        records.append(record)
+        if len(records) > _AUDIT_LOG_MAX_RECORDS:
+            records = records[-_AUDIT_LOG_MAX_RECORDS:]
+        _write_encrypted(_AUDIT_LOG_PATH, records)
     except OSError:
         logger.warning("Failed to write admin audit log entry: %r", record)
 
 
 def read_audit_log(limit: int = 50) -> list[dict]:
     """Most-recent-first audit entries, up to `limit`. [] if none logged yet."""
-    if not _AUDIT_LOG_PATH.exists():
+    records = _read_encrypted(_AUDIT_LOG_PATH, default=[])
+    if not isinstance(records, list):
         return []
-    try:
-        lines = _AUDIT_LOG_PATH.read_text().splitlines()
-    except OSError:
-        return []
-    records = []
-    for line in lines[-limit:]:
-        try:
-            records.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    records.reverse()
-    return records
+    return list(reversed(records[-limit:]))
 
 
 def read_refresh_meta() -> dict | None:
     """Return {'ts': float, 'by': str} from the last refresh, or None if the
     data has never been manually refreshed."""
-    if not _META_PATH.exists():
-        return None
-    try:
-        return json.loads(_META_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        logger.warning("refresh_meta.json is unreadable; treating as absent.")
-        return None
+    return _read_encrypted(_META_PATH, default=None)
 
 
 def _write_refresh_meta(email: str) -> None:
-    _META_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _META_PATH.write_text(json.dumps({"ts": time.time(), "by": email}))
+    _write_encrypted(_META_PATH, {"ts": time.time(), "by": email})
 
 
 def cooldown_remaining() -> int:
