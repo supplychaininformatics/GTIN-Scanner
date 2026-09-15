@@ -6,26 +6,33 @@ what needs infra-level action rather than a code change. Companion to
 [ASVS-AUDIT.md](ASVS-AUDIT.md) (Phase 1 findings) — read that first for the
 full context behind each item below.
 
-All commits referenced are on `main`, range `d04fc01..HEAD`.
+All commits referenced are on `main`, range `d04fc01..HEAD`. This doc was
+updated a second time (commits `7989a5f`..`HEAD`, plus the lockfile) after
+the user asked to close out everything left "not addressed" or "partially
+fixed" from the first pass — those items are now folded into the tables
+below rather than kept as a separate follow-up list.
 
 ## Summary: findings → status
 
 | # | Finding | Status |
 |---|---|---|
 | 1 | Monitor board had no access control | **Fixed** — typed-email gate, shared with admin |
-| 2 | Admin auth is typed-email, not verified identity | **Unchanged, by design** — see "Needs infra action" |
+| 2 | Admin auth is typed-email, not verified identity | **Unchanged, by design** — needs an IT-provisioned identity provider; see "Needs infra action" |
 | 3 | GTIN never validated before use | **Fixed** |
 | 4 | Excel export vulnerable to formula injection | **Fixed** |
-| 5 | No offline queue for scan writes | **Partially fixed** — server↔Neon hop only; handheld WiFi dead zones remain out of scope (see below) |
-| 6 | Streamlit's default error page can leak stack traces | **Not fixed in this pass** — see "Not addressed" |
+| 5 | No offline queue for scan writes | **Fixed, within the confirmed scope** — server↔Neon hop, including the resume-before-sync gap; handheld WiFi dead zones remain a separate, larger problem (see below) |
+| 6 | Streamlit's default error page can leak stack traces | **Fixed** (`7989a5f`) |
 | 7 | GUDID URL built by raw string interpolation | **Fixed** |
 | 8 | Local Parquet cache unencrypted, no hard expiry | **Fixed** (and threat model corrected — see ASVS-AUDIT.md) |
-| 9 | Neon connection string plaintext on disk | **Mitigated** — keychain preferred; Streamlit-secrets fallback remains |
+| 9 | Neon connection string plaintext on disk | **Mitigated** — keychain preferred; live credential migrated off `.streamlit/secrets.toml` on this machine; Streamlit-secrets fallback remains for deploy targets that need it |
 | 10 | No egress allowlist | **Fixed at the application level** — network-level enforcement is infra's job |
 | 11 | Dependency vulnerabilities | **Fixed** — 0 known vulns as of this commit |
 | 12 | No timeout/retry/circuit breaker on Fabric | **Fixed** |
-| 13 | Admin/audit-log files unencrypted on disk | **Not addressed** — see "Not addressed" |
-| 14 | No dependency lockfile | **Not addressed** — see "Not addressed" |
+| 13 | Admin/audit-log files unencrypted on disk | **Fixed** (`781d04f`) |
+| 14 | No dependency lockfile | **Fixed** (`requirements.lock.txt`) |
+
+Only finding #2 remains genuinely open, and it needs an action outside this
+repo (see "Needs infra action"). Everything else fixable in code is fixed.
 
 ---
 
@@ -47,8 +54,22 @@ All commits referenced are on `main`, range `d04fc01..HEAD`.
   "hanging the app" requirements directly.
 - **Offline write buffering** (`core/offline_queue.py`, commit `3c14562`) —
   hardens the Streamlit server's own connection to Neon against a
-  transient outage. **This is a partial fix relative to your original
-  brief** — see the dedicated section below.
+  transient outage. This is scoped narrower than the original brief's
+  "offline queuing" ask — see the dedicated section below for why (an
+  architecture constraint, not a shortcut).
+- **Offline-resume gap closed, and an unguarded crash fixed** (commit
+  `a18c720`) — a session started while Neon was unreachable existed only in
+  the write queue until it synced; a refresh before then made
+  `store.get_session()` return `None` and look exactly like an unknown/
+  purged session, dropping the picker back to the start gate even though
+  nothing was actually lost. `core.session.resume_pending_session` now
+  reconstructs it from the queue. Writing this surfaced a second, more
+  serious bug in the same area: `app.py`'s force-end liveness check calls
+  `store.get_session()` on *every rerun* once a session is active (i.e.
+  every scan) and was completely unguarded — during a real Neon outage this
+  would have crashed the page on the very first scan, before the write ever
+  reached the offline-queue fallback the previous commit built. Now fails
+  open (an unreachable Neon reads as "still active," never as a force-end).
 
 ### V4 — Access Control
 
@@ -95,23 +116,28 @@ All commits referenced are on `main`, range `d04fc01..HEAD`.
   already logged for GUDID/Fabric. All three egress points now log
   endpoint + outcome + timestamp (via the shared log formatter), which is
   what your brief asked for IT's monitoring needs.
-- **Stack-trace leakage to the UI (finding #6) is NOT fixed** — see "Not
-  addressed" below. This is the one item from the original audit that
-  didn't get a Phase 2 commit; flagging it explicitly rather than letting
-  it look closed by omission.
+- **Stack-trace leakage to the UI fixed** (`.streamlit/config.toml`, commit
+  `7989a5f`) — `client.showErrorDetails` set to `"none"`, so an uncaught
+  non-connectivity exception (a real bug, a Fabric/ODBC failure outside the
+  retry path) shows a generic message in the browser instead of the full
+  exception type/message/traceback. Full details still print to the server
+  console. Overridable per local dev session via
+  `STREAMLIT_CLIENT_SHOWERRORDETAILS=full` rather than editing the file, so
+  the safe default always ships.
 
 ### V8 — Data Protection
 
 - **Secrets prefer the OS keychain** (`core/secrets.py`, commit `3efc374`)
   — the Neon connection string and Fabric service-principal secret now try
   the OS keychain (via `keyring`) before falling back to
-  `.streamlit/secrets.toml`. `scripts/store_secret.py` is the one-time
-  operator action to actually move a secret there; **this migration has
-  not been run** — the real secret is still sitting in
-  `.streamlit/secrets.toml` on this machine as of this commit. That's a
-  five-minute manual step for whoever owns that credential, not something
-  this pass did automatically (it touches a live credential store and
-  seemed better left to an explicit choice).
+  `.streamlit/secrets.toml`. The live Neon credential on this machine has
+  since been migrated: `scripts/store_secret.py` (run via a small one-off
+  script that read the value straight out of the TOML file, so it never
+  passed through a shell command) moved it into the keychain, the
+  round-trip was verified, and the plaintext `url` line in
+  `.streamlit/secrets.toml` was then stripped and replaced with a commented-
+  out restore path. That file stays git-ignored throughout, so none of this
+  touched version control.
 - **Contract-data cache encrypted at rest, with a hard expiry ceiling**
   (`data/loader.py`, commit `1e4b9ae`) — Fernet-encrypted (same
   keychain-backed key pattern), and refuses to serve anything older than 7
@@ -120,8 +146,15 @@ All commits referenced are on `main`, range `d04fc01..HEAD`.
   auto-expiry** (`core/offline_queue.py`, commit `3c14562`) — SHA-256
   checksum per entry verified before replay; entries older than 24h are
   dropped.
-- **Audit log / admin refresh-meta files remain plaintext on disk** —
-  see "Not addressed."
+- **Admin audit log / refresh metadata encrypted at rest** (`core/admin.py`,
+  commit `781d04f`) — same Fernet/keychain pattern, switched from append-only
+  JSON Lines to a single encrypted JSON array (capped at 2000 records) since
+  whole-file encryption makes "append" a decrypt/re-encrypt operation, which
+  is the right tradeoff for a low-volume admin log. This machine's real
+  audit history (27 records) was migrated from the old plaintext files into
+  the new encrypted ones and verified before the plaintext originals were
+  deleted — both files are git-ignored, so nothing here touched version
+  control either.
 
 ### V9 — Communications
 
@@ -143,7 +176,15 @@ All commits referenced are on `main`, range `d04fc01..HEAD`.
   Pillow, cryptography, gitpython, starlette, pip. Re-ran `pip-audit`
   against the actual installed environment: 0 known vulnerabilities, down
   from 5 flagged packages / 69 advisories at the start of this audit.
-- **No dependency lockfile** — see "Not addressed."
+- **Dependency lockfile added** (`requirements.lock.txt`) — every package in
+  the full dependency closure of `pip install -e ".[fabric,dev]"` pinned to
+  an exact version, resolved in a clean venv (not frozen from the long-lived
+  dev `.venv`, which had accumulated unrelated packages like `playwright`)
+  and re-verified with `pip-audit`: 0 known vulnerabilities. `requirements.
+  txt`/`pyproject.toml` stay the source of truth for version ranges; the
+  lock file is what makes "what's actually installed" reproducible without
+  needing shell access to a running environment, which is what this audit
+  needed to do at the start to find the pandas version mismatch noted above.
 
 ---
 
@@ -167,14 +208,13 @@ issue, a brief maintenance window). That's what `core/offline_queue.py`
 does — it does not, and cannot, fix a handheld that can't reach the server
 at all.
 
-**Known residual gap even within that narrower scope**: `start_session()`
-generates the session id locally and queues the `create_session` write if
-Neon is unreachable at that moment. If the browser refreshes or the tab is
-lost before that queued write actually lands, the resume-by-URL flow
-(`app.py`'s `?sid=` gate) won't find a row to resume from — there's no
-server-side record yet. This is a narrow window (only between session
-start and the first successful sync) but it exists, and is called out in
-`core/session.start_session`'s docstring.
+**The resume-before-sync gap this used to have is now closed** (commit
+`a18c720`): `start_session()` generates the session id locally and queues
+the `create_session` write if Neon is unreachable at that moment; if the
+browser refreshes or the tab is lost before that queued write lands, the
+resume-by-URL flow now checks the offline queue
+(`core.session.resume_pending_session`) and rehydrates from there instead
+of finding nothing and looking like the session never existed.
 
 **If you want the actual client-side WiFi dead-zone problem solved**, that
 needs a different kind of client: a service worker, local storage, and
@@ -184,30 +224,15 @@ scope it separately if it's worth doing.
 
 ---
 
-## Not addressed in this pass
+## Not addressed
 
-These were in the Phase 1 audit but didn't get a Phase 2 commit. Not
-forgotten — deliberately left for you to prioritize, since none of them
-were on your original 8-item list and each has a real design decision
-behind it:
-
-1. **Streamlit's default error page can leak stack traces (finding #6,
-   V7.4).** Fix is small — `.streamlit/config.toml`'s `[client]
-   showErrorDetails` set to `"none"` or `"type"` — but changes what
-   developers/admins see when something breaks in production too, which
-   felt like a call you should make rather than one to make silently.
-2. **Admin audit log and refresh-metadata files are plaintext on local
-   disk** (`data/cache/admin_audit.log`, `refresh_meta.json`). Lower
-   severity than the credential/cache findings — this is an audit trail,
-   not a secret — but the same encryption pattern used for the write queue
-   and contract cache could be extended here if you want it.
-3. **No dependency lockfile** (finding #14). `requirements.txt`/
-   `pyproject.toml` now have accurate version floors, but nothing pins
-   exact versions for reproducibility. Adding `pip-compile` (pip-tools) or
-   migrating to `uv` would close this and make future SCA runs auditable
-   from the manifest alone rather than needing shell access to the running
-   environment (as this audit did).
-4. **`start_session`'s narrow resume-before-sync gap** described above.
+Nothing fixable from inside this repo remains open. The four items
+previously listed here — Streamlit's error-detail leak, the plaintext
+admin audit log, the missing dependency lockfile, and `start_session`'s
+resume-before-sync gap — are now covered above (`7989a5f`, `781d04f`,
+`requirements.lock.txt`, `a18c720`). The only genuinely open item is
+finding #2 (admin auth), which needs an IT-provisioned identity provider —
+see below.
 
 ---
 
@@ -250,14 +275,17 @@ behind it:
 
 ## Verifying this yourself
 
-- `pytest tests/` — 83 tests, all passing as of `798eaf8`, covering every
+- `pytest tests/` — 96 tests, all passing as of `a18c720`, covering every
   security-relevant change in this document (egress allowlist, TLS
   enforcement, GTIN validation, export injection, offline queue encryption/
-  integrity/expiry, contract-cache encryption/expiry, circuit breakers,
-  log sanitization).
-- `pipx run pip-audit` against `.venv` (or wherever this is deployed) — 0
-  known vulnerabilities as of this commit; re-run periodically, since this
-  is a point-in-time result, not a standing guarantee.
+  integrity/expiry/resume, contract-cache encryption/expiry, admin-log
+  encryption, circuit breakers, log sanitization).
+- `pipx run pip-audit` — 0 known vulnerabilities as of this commit, checked
+  two ways: against the long-lived dev `.venv`, and independently against a
+  clean venv built from `requirements.lock.txt` alone (so the lock file
+  itself is verified, not just assumed clean because the dev venv was).
+  Re-run periodically, since this is a point-in-time result, not a standing
+  guarantee.
 - The app was smoke-tested (`streamlit run app.py`, mock data source) after
   every commit in this series and confirmed to still start and serve scans
   correctly.

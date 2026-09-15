@@ -405,8 +405,16 @@ No `.env` changes are needed for the goodID integration. It works out of the box
 | `httpx` | ≥ 0.27 | Synchronous HTTP client for goodID API |
 | `pyarrow` | ≥ 15.0 | Parquet read/write for the 24h contract-data cache (`data/cache/contract_lines.parquet`) |
 | `openpyxl` | ≥ 3.1 | Excel engine for per-session export (`core/export.py`) |
-| `Pillow` | ≥ 10.0 | Logo image processing (`ui/components.py`) |
+| `Pillow` | ≥ 12.3 | Logo image processing (`ui/components.py`) |
+| `keyring` | ≥ 25.0 | OS-keychain-backed secret storage (`core/secrets.py`) — Neon connection string, Fabric service-principal secret, and the offline-queue/cache encryption keys all prefer this over plaintext config |
+| `cryptography` | ≥ 42.0 | Encrypts the offline write queue, contract-data cache, and admin audit log at rest (`core/offline_queue.py`, `data/loader.py`, `core/admin.py`) |
 | `pyodbc` | ≥ 5.1 | *(optional, production only, `pip install -e ".[fabric]"`)* Fabric Lakehouse connection. Also needs the Microsoft ODBC driver installed at system level. |
+
+`requirements.lock.txt` pins the exact, `pip-audit`-verified version of every
+package in this table plus their full transitive closure (including the
+`fabric`/`dev` extras) — see that file's header for how to use/regenerate
+it. `requirements.txt`/`pyproject.toml` stay the source of truth for the
+version *ranges* above.
 
 ---
 
