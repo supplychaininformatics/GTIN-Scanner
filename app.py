@@ -35,7 +35,9 @@ import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 from core import store
+from core.connectivity import is_connectivity_error
 from core.export import EXPORT_MIME, build_workbook, export_filename
+from core.offline_queue import find_pending_session
 from core.lookup import extract_gtin, get_lookup_engine, resolve_scan
 from core.session import (
     clear_result,
@@ -45,6 +47,7 @@ from core.session import (
     init_session,
     record_duplicate_scan,
     record_scan,
+    resume_pending_session,
     resume_session,
     start_session,
 )
@@ -84,14 +87,39 @@ def _get_engine_lazy():
 if not st.session_state.session_id:
     resume_sid = st.query_params.get("sid")
     if resume_sid:
-        saved = store.get_session(resume_sid)
+        # Neon unreachable here must not be treated the same as "unknown
+        # session" — that would drop the sid and bounce the picker to the
+        # start gate, which looks exactly like their scans were lost even
+        # when they weren't. See core.session.resume_pending_session and
+        # ASVS-COMPLIANCE.md's offline-queue section for the gap this closes.
+        try:
+            saved = store.get_session(resume_sid)
+            reachable = True
+        except Exception as exc:
+            if not is_connectivity_error(exc):
+                raise
+            saved, reachable = None, False
+
         if saved and saved["status"] == store.STATUS_ACTIVE:
             resume_session(resume_sid, saved)
             st.rerun()
+        elif not reachable and resume_pending_session(resume_sid) is not None:
+            # The session (and maybe some scans) are still queued locally,
+            # not yet in Neon — rehydrate from there instead.
+            st.rerun()
+        elif not reachable:
+            # Neither Neon nor the offline queue has anything for this id —
+            # genuinely can't tell whether it's resumable right now.
+            st.markdown(C.identity_header_html(page_name="Handheld"), unsafe_allow_html=True)
+            st.error(
+                "Can't reach the database right now to resume this session. "
+                "Your scans are safe — reload this page in a moment."
+            )
+            st.stop()
         else:
-            # Unknown, already-ended, or force-ended session — drop the dead
-            # param and fall through to a normal start gate instead of
-            # looping on it.
+            # Reachable, and legitimately unknown/already-ended/purged —
+            # drop the dead param and fall through to a normal start gate
+            # instead of looping on it.
             del st.query_params["sid"]
 
     st.markdown(C.identity_header_html(page_name="Handheld"), unsafe_allow_html=True)
@@ -166,8 +194,32 @@ if "engine_loaded" not in st.session_state:
 # is already ended, and calling end_session() would overwrite the supervisor's
 # ended_at with a later timestamp, corrupting the audit trail of when the
 # force-end actually happened.
-current = store.get_session(st.session_state.session_id)
-if current is None or current["status"] != store.STATUS_ACTIVE:
+#
+# This runs on every rerun once a session is active — i.e. on every scan —
+# so it must never let a Neon outage look like a force-end. Two distinct
+# "not really force-ended" cases besides the normal "still active" one:
+#   * Neon unreachable at all: can't confirm either way, so fail open and
+#     assume still active rather than bouncing an in-progress shift back to
+#     the start gate over a transient blip.
+#   * Neon reachable but the row doesn't exist yet: this session may have
+#     been started while offline and is still sitting in the write queue
+#     (see core.session.start_session) rather than actually gone.
+try:
+    current = store.get_session(st.session_state.session_id)
+    reachable = True
+except Exception as exc:
+    if not is_connectivity_error(exc):
+        raise
+    current, reachable = None, False
+
+is_force_ended = False
+if reachable:
+    if current is not None:
+        is_force_ended = current["status"] != store.STATUS_ACTIVE
+    else:
+        is_force_ended = find_pending_session(st.session_state.session_id) is None
+
+if is_force_ended:
     st.session_state.session_id = None
     st.session_state.sanford_id = None
     st.session_state.warehouse_location = None

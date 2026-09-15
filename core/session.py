@@ -202,10 +202,10 @@ def start_session(sanford_id: str, location: str) -> None:
     The id is minted here (store.new_session_id() is a pure function, no DB
     call) rather than inside store.create_session(), specifically so scanning
     can start immediately even if the INSERT below has to be queued for a
-    transient Neon outage (see core/offline_queue.py) — a refresh before that
-    queued write lands won't resume correctly (there's no row yet to resume
-    from), which is the one known gap in this fallback; see
-    ASVS-COMPLIANCE.md.
+    transient Neon outage (see core/offline_queue.py). A refresh before that
+    queued write lands resumes via resume_pending_session() instead of
+    store.get_session() (see app.py's resume gate) — the offline queue is the
+    only place that row exists until it syncs.
     """
     session_id = store.new_session_id()
     st.session_state.sanford_id = sanford_id
@@ -241,6 +241,31 @@ def resume_session(session_id: str, session_row: dict) -> None:
     st.session_state.warehouse_location = session_row["location"]
     st.session_state.scan_history = history_for_session(session_id)
     st.session_state.last_result = None
+
+
+def resume_pending_session(session_id: str) -> dict | None:
+    """Like resume_session(), but rehydrates from the offline queue instead
+    of the store — for a session whose create_session write (and any scans
+    made before it synced) haven't reached Neon yet.
+
+    Returns the reconstructed row (same shape store.get_session() would
+    have returned) if a pending create_session exists for this id, so the
+    caller (app.py's resume gate) can drive both paths the same way. Returns
+    None if there's nothing queued for this id either — a genuinely unknown
+    or already-synced-and-since-purged session.
+    """
+    pending = offline_queue.find_pending_session(session_id)
+    if pending is None:
+        return None
+    st.session_state.session_id = session_id
+    st.session_state.sanford_id = pending["sanford_id"]
+    st.session_state.warehouse_location = pending["location"]
+    st.session_state.scan_history = [
+        _entry_from_result(result, scan_count=1)
+        for result in offline_queue.pending_scans_for_session(session_id)
+    ]
+    st.session_state.last_result = None
+    return pending
 
 
 def end_session() -> None:

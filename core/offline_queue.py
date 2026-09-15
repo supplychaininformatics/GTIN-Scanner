@@ -32,6 +32,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import UTC, datetime
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -173,6 +174,52 @@ def pending_count() -> int:
     """How many writes are currently waiting to sync — for UI messaging."""
     with _lock:
         return len(_prune(_load()))
+
+
+def find_pending_session(session_id: str) -> dict | None:
+    """A store `session`-row-shaped dict reconstructed from a still-queued
+    create_session entry for `session_id`, or None if there isn't one.
+
+    Lets a resume-by-URL flow work even when the session's INSERT hasn't
+    reached Neon yet, instead of looking like an unknown/purged session —
+    see core.session.resume_pending_session, and start_session's docstring
+    for the gap this closes.
+    """
+    with _lock:
+        entries = _prune(_load())
+    for entry in entries:
+        if entry["op"] == "create_session" and entry["args"].get("session_id") == session_id:
+            args = entry["args"]
+            created_at = datetime.fromtimestamp(entry["ts"], tz=UTC).replace(microsecond=0).isoformat()
+            return {
+                "session_id": session_id,
+                "sanford_id": args["sanford_id"],
+                "location": args["location"],
+                "status": "active",
+                "created_at": created_at,
+                "ended_at": None,
+            }
+    return None
+
+
+def pending_scans_for_session(session_id: str) -> list[dict]:
+    """Queued record_scan results for `session_id`, oldest first.
+
+    Used to rebuild scan history on a resume before those writes have
+    synced. Does not cover a queued increment_scan on its own (a rescan
+    carries no display fields, only session_id+gtin — the rest lives on
+    the scan_history entry that was already in hand at the time of the
+    rescan) — a narrow, documented gap, not a data-loss one: the queued
+    increment still applies once synced, it just doesn't retroactively
+    reconstruct on this code path.
+    """
+    with _lock:
+        entries = _prune(_load())
+    return [
+        entry["args"]["result"]
+        for entry in entries
+        if entry["op"] == "record_scan" and entry["args"].get("session_id") == session_id
+    ]
 
 
 def flush() -> int:
