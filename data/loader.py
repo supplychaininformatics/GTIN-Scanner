@@ -45,6 +45,13 @@ _MAX_CACHE_AGE_SECONDS = 7 * 86400
 _CACHE_KEYRING_NAME = "contract_cache_key"
 _CACHE_FALLBACK_KEY_PATH = CACHE_PATH.parent / ".contract_cache_key"
 
+# Fabric connection resilience — see _load_from_lakehouse(). Lazily
+# constructed (see core.circuit_breaker's module docstring on why a
+# module-level `core.*` import is avoided in files core.lookup depends on).
+_fabric_breaker = None
+_FABRIC_MAX_ATTEMPTS = 2
+_FABRIC_RETRY_BACKOFF_SECONDS = 1.0
+
 
 def _cache_key() -> bytes:
     """Fernet key for the on-disk contract-data cache.
@@ -477,22 +484,52 @@ def _load_from_lakehouse() -> pd.DataFrame:
     endpoint = os.environ["FABRIC_SQL_ENDPOINT"]
     logger.info("Connecting to Fabric SQL analytics endpoint at %s", endpoint)
 
+    # Circuit breaker + bounded retry, same shape as api.goodid_client's
+    # GUDID call — see ASVS-AUDIT.md item 6. Fabric refresh is already rate-
+    # limited by the 24h cache / 300s admin cooldown, so retry-storm risk is
+    # lower here than for GUDID (hit on every scan), but a sustained Fabric
+    # outage should still fail fast on repeated refresh attempts rather than
+    # hang each one on a full connection timeout.
+    from core.circuit_breaker import CircuitBreaker, CircuitOpenError  # noqa: PLC0415
+
+    global _fabric_breaker
+    if _fabric_breaker is None:
+        _fabric_breaker = CircuitBreaker("fabric", failure_threshold=2, cooldown_seconds=60.0)
+
     try:
-        conn = pyodbc.connect(
-            _fabric_connection_string(),
-            attrs_before={_SQL_COPT_SS_ACCESS_TOKEN: _fabric_access_token()},
-        )
-    except pyodbc.InterfaceError as e:
-        # IM002 means the ODBC *driver* is missing — a system-level install that
-        # pip cannot do for you. It is by far the most common first-run failure,
-        # and the raw driver message does not say how to fix it.
-        if "IM002" in str(e):
-            raise RuntimeError(
-                f"ODBC driver {os.getenv('FABRIC_ODBC_DRIVER', DEFAULT_ODBC_DRIVER)!r} "
-                "is not installed. Install the Microsoft ODBC Driver 18 for SQL Server "
-                "(see README → 'Switching to the Fabric Lakehouse'), then retry."
-            ) from e
-        raise
+        _fabric_breaker.before_call()
+    except CircuitOpenError as e:
+        raise RuntimeError(str(e)) from e
+
+    conn = None
+    last_operational_error: pyodbc.OperationalError | None = None
+    for attempt in range(1, _FABRIC_MAX_ATTEMPTS + 1):
+        try:
+            conn = pyodbc.connect(
+                _fabric_connection_string(),
+                attrs_before={_SQL_COPT_SS_ACCESS_TOKEN: _fabric_access_token()},
+            )
+            _fabric_breaker.record_success()
+            break
+        except pyodbc.InterfaceError as e:
+            # IM002 means the ODBC *driver* is missing — a system-level install
+            # that pip cannot do for you, and retrying changes nothing. Not a
+            # connectivity failure, so it doesn't count against the breaker.
+            if "IM002" in str(e):
+                raise RuntimeError(
+                    f"ODBC driver {os.getenv('FABRIC_ODBC_DRIVER', DEFAULT_ODBC_DRIVER)!r} "
+                    "is not installed. Install the Microsoft ODBC Driver 18 for SQL Server "
+                    "(see README → 'Switching to the Fabric Lakehouse'), then retry."
+                ) from e
+            raise
+        except pyodbc.OperationalError as e:
+            last_operational_error = e
+            if attempt < _FABRIC_MAX_ATTEMPTS:
+                time.sleep(_FABRIC_RETRY_BACKOFF_SECONDS)
+
+    if conn is None:
+        _fabric_breaker.record_failure()
+        raise last_operational_error
 
     try:
         cursor = conn.cursor()
