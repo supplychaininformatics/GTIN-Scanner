@@ -44,7 +44,12 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # Must match the interpreter requirements.lock.txt was generated
+          # with — see that file's header. A version mismatch here isn't
+          # theoretical: the first version of this workflow used 3.11 while
+          # the lock file had been resolved under 3.14, which had picked
+          # numpy==2.5.3 (requires Python >=3.12) and failed outright in CI.
+          python-version: "3.13"
           cache: "pip"
 
       # requirements.lock.txt is the exact, pip-audit-verified set (see its
