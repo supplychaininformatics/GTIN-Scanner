@@ -26,6 +26,11 @@ dependencies = [
     # macOS Keychain, Windows Credential Locker, Secret Service (GNOME/KDE)
     # on Linux.
     "keyring>=25.0.0",
+    # Encrypts the offline write queue and the contract-data cache at rest —
+    # see core/offline_queue.py and data/loader.py. >=42.0.0 floor is a
+    # deliberately current pin: this package is security-load-bearing here,
+    # not an incidental transitive dependency.
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

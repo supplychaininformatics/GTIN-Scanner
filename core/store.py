@@ -244,15 +244,21 @@ def _cursor() -> Iterator[psycopg.Cursor]:
 
 
 # ── Session lifecycle ───────────────────────────────────────────────────────
-def create_session(sanford_id: str, location: str) -> str:
+def create_session(sanford_id: str, location: str, session_id: str | None = None) -> str:
     """Insert a new ACTIVE session and return its id.
 
     Called handheld-side at form submit — see core/session.start_session.
     The row is written immediately, before the first scan, so a refresh in
     the window between form submit and the first scan can still resume via
     the URL's `sid` instead of dropping back to the start gate.
+
+    `session_id`: pass an id already minted elsewhere instead of generating
+    one here. Used by the offline-write-queue replay path (core/session.py
+    generates the id locally so scanning can continue before this INSERT has
+    actually landed, then replays this exact call once Neon is reachable
+    again) — omit it for the normal online path, which mints its own.
     """
-    session_id = new_session_id()
+    session_id = session_id or new_session_id()
     with _cursor() as cur:
         cur.execute(
             "INSERT INTO session (session_id, sanford_id, location, status, "

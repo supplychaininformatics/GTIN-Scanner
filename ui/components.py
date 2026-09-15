@@ -308,6 +308,18 @@ def scan_result_card_html(result: dict, full_record: dict) -> str:
     is_duplicate = bool(result.get("duplicate"))
     cls = f'{meta["cls"]} is-duplicate' if is_duplicate else meta["cls"]
     banner = '<div class="sf-hero-dup">Item already scanned</div>' if is_duplicate else ""
+    # persisted is False when core.session had to queue this scan's store
+    # write instead of applying it immediately (see core/offline_queue.py) —
+    # tell the picker plainly rather than let it look silently saved. This is
+    # about the SERVER's connection to Neon, not the handheld's own WiFi —
+    # see ASVS-COMPLIANCE.md for that distinction.
+    pending_banner = (
+        '<div class="sf-hero-pending">⚠️ Not saved yet — no connection to the '
+        "database right now. Keep scanning; this will sync automatically "
+        "once the connection is back.</div>"
+        if result.get("persisted") is False
+        else ""
+    )
     # Suppress the miss note on an API-found result: it's the diagnosis for why
     # the LOCAL cache missed, but shown next to "API Found" it reads as a
     # contradiction ("found" + "item not on contract"). Still recorded on the
@@ -332,6 +344,7 @@ def scan_result_card_html(result: dict, full_record: dict) -> str:
     return f"""
 <div class="sf-hero sf-hero-merged {cls}">
   {banner}
+  {pending_banner}
   <div class="sf-hero-top">
     {status_pill_html(key)}
     <span class="sf-hero-gtin-wrap">
@@ -472,9 +485,18 @@ def handheld_history_table_html(history: list[dict]) -> str:
 
         # Only the newest row animates in.
         cls = ' class="sf-new"' if i == 0 else ""
+        # Marks a scan whose store write is still queued (see
+        # core/offline_queue.py) — a quiet inline cue in the history table,
+        # separate from the louder banner shown at scan time (see
+        # scan_result_card_html's pending_banner).
+        pending_mark = (
+            '<span title="Not saved yet — will sync automatically">⏳ </span>'
+            if entry.get("pending_sync")
+            else ""
+        )
         rows.append(
             f"<tr{cls}>"
-            f'<td class="sf-mono sf-dim sf-nowrap">{_val(time_str)}</td>'
+            f'<td class="sf-mono sf-dim sf-nowrap">{pending_mark}{_val(time_str)}</td>'
             f"<td>{status_pill_html(key)}</td>"
             f"{scan_cell}"
             f'{_miss_cell(entry, str(entry.get("Item") or "").strip(), "sf-mono sf-wrap")}'

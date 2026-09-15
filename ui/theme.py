@@ -619,6 +619,20 @@ html:has(.sf-header.is-identity-only) {
     margin: 0 0 .75rem;
 }
 
+/* Shown when a scan's store write had to be queued for a transient Neon
+   outage instead of landing immediately — see core.session.record_scan and
+   core.offline_queue. Same amber "needs attention" token as ON HOLD, since
+   this is a warning to keep scanning-and-syncing, not a failure. */
+.sf-hero-pending {
+    display: flex; align-items: baseline; gap: .4rem; flex-wrap: wrap;
+    font-size: .8125rem; font-weight: 600; color: var(--sf-ink);
+    background: var(--sf-amber-tint);
+    border: 1px solid var(--sf-amber-edge);
+    border-radius: 8px;
+    padding: .5rem .7rem;
+    margin: 0 0 .75rem;
+}
+
 /* Miss reason (see C.miss_note_html). Explanatory, not a verdict — so it is
    deliberately quieter than the status pill sitting directly above it: no
    fill, a hairline rule instead of a border, and muted body text. The one

@@ -18,14 +18,18 @@ it on every resume rather than being its own source of truth.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import streamlit as st
 
 from engine.lookup import MISS_LABELS
 
-from . import store
+from . import offline_queue, store
+from .connectivity import is_connectivity_error
 from .lookup import STATUS_API, STATUS_CACHE, STATUS_HOLD, STATUS_NOT_FOUND
+
+logger = logging.getLogger(__name__)
 
 # How often a rerun is allowed to actually run the purge sweep, rather than on
 # every single rerun (which fires once per scan). Module-level, not
@@ -117,12 +121,52 @@ def _row_to_entry(row: dict) -> dict:
     }
     for col, label in _ROW_TO_FULL_RECORD.items():
         entry[label] = row.get(col, "")
+    # A real row read back from the store is, by definition, already durably
+    # saved — see _entry_from_result for the offline counterpart.
+    entry["pending_sync"] = False
+    return entry
+
+
+def _entry_from_result(result: dict, scan_count: int) -> dict:
+    """Build a scan-history UI entry directly from a resolve_scan() result,
+    with no DB round trip.
+
+    Used only when the write to the store had to be queued instead of
+    applied immediately (see core/offline_queue.py) — the picker still needs
+    to see the scan they just made even though it isn't durably saved yet,
+    so this mirrors _row_to_entry's shape from data already in hand rather
+    than reading it back from a store that just failed to reach.
+    """
+    full = result.get("full_record", {})
+    miss_reason = result.get("miss_reason")
+    entry = {
+        "time": result.get("time") or datetime.now().strftime("%H:%M:%S"),
+        "gtin": result["gtin"],
+        "source": result.get("source_label", result.get("source", "")),
+        "status": _STATUS_LABELS.get(result["status_key"], result["status_key"]),
+        "status_key": result["status_key"],
+        "on_hold": bool(result.get("on_hold")),
+        "Scan Count": scan_count,
+        "Scan": full.get("Scan") or result["gtin"],
+        "GTIN": result["gtin"],
+        "miss_reason": miss_reason,
+        "Miss Reason": MISS_LABELS.get(miss_reason, "") if miss_reason else "",
+        "Miss Detail": result.get("miss_detail") or "",
+        "pending_sync": True,
+    }
+    for label in _FULL_RECORD_KEYS:
+        if label != "GTIN":
+            entry[label] = full.get(label, "")
     return entry
 
 
 def init_session() -> None:
     """Initialise session state keys on first run. Idempotent."""
     _maybe_purge()
+    # Cheap when the queue is empty (one small file read) and internally
+    # rate-limited when it isn't (see offline_queue._FLUSH_COOLDOWN_SECONDS),
+    # so this is safe to call unconditionally on every rerun.
+    offline_queue.flush()
     if "scan_history" not in st.session_state:
         st.session_state.scan_history = []
     if "last_result" not in st.session_state:
@@ -153,10 +197,29 @@ def start_session(sanford_id: str, location: str) -> None:
     the window between entering the start-form and scanning the first item
     can still resume from the URL's `sid` instead of dropping back to the
     start gate. See app.py's resume gate and core/store.create_session.
+
+    The id is minted here (store.new_session_id() is a pure function, no DB
+    call) rather than inside store.create_session(), specifically so scanning
+    can start immediately even if the INSERT below has to be queued for a
+    transient Neon outage (see core/offline_queue.py) — a refresh before that
+    queued write lands won't resume correctly (there's no row yet to resume
+    from), which is the one known gap in this fallback; see
+    ASVS-COMPLIANCE.md.
     """
+    session_id = store.new_session_id()
     st.session_state.sanford_id = sanford_id
     st.session_state.warehouse_location = location
-    st.session_state.session_id = store.create_session(sanford_id, location)
+    try:
+        store.create_session(sanford_id, location, session_id=session_id)
+    except Exception as exc:
+        if not is_connectivity_error(exc):
+            raise
+        logger.warning("Neon unreachable starting session %s; queuing.", session_id, exc_info=True)
+        offline_queue.enqueue(
+            "create_session",
+            {"sanford_id": sanford_id, "location": location, "session_id": session_id},
+        )
+    st.session_state.session_id = session_id
     st.session_state.scan_history = []
     st.session_state.last_result = None
 
@@ -181,9 +244,25 @@ def resume_session(session_id: str, session_row: dict) -> None:
 
 def end_session() -> None:
     """End this session in the store (normal, handheld-only path) and reset
-    local state back to the start gate."""
+    local state back to the start gate.
+
+    Local state resets unconditionally either way — even if the UPDATE below
+    has to be queued for a transient Neon outage, the picker is done with
+    this device for this session, and there is no local state left to fall
+    back to anyway. The board will show the session as still ACTIVE until
+    the queued end_session syncs.
+    """
     if st.session_state.session_id:
-        store.end_session(st.session_state.session_id)
+        try:
+            store.end_session(st.session_state.session_id)
+        except Exception as exc:
+            if not is_connectivity_error(exc):
+                raise
+            logger.warning(
+                "Neon unreachable ending session %s; queuing.",
+                st.session_state.session_id, exc_info=True,
+            )
+            offline_queue.enqueue("end_session", {"session_id": st.session_state.session_id})
     st.session_state.sanford_id = None
     st.session_state.warehouse_location = None
     st.session_state.session_id = None
@@ -206,12 +285,33 @@ def find_duplicate(gtin: str) -> dict | None:
 
 def record_scan(result: dict) -> None:
     """Persist a resolved scan: insert its row in the store and append the
-    UI-shaped entry to the in-memory history."""
-    st.session_state.last_result = {**result, "duplicate": False}
+    UI-shaped entry to the in-memory history.
 
-    store.record_scan(st.session_state.session_id, result)
-    row = store.find_scan(st.session_state.session_id, result["gtin"])
-    st.session_state.scan_history.append(_row_to_entry(row))
+    If Neon can't be reached right now, the write is queued instead of
+    raised (see core/offline_queue.py) and the history entry is built
+    locally from `result` — the picker keeps scanning uninterrupted, with
+    `last_result["persisted"]` telling app.py to show that this one hasn't
+    synced yet. A non-connectivity error (a real bug, a constraint
+    violation) still raises normally rather than being masked as "offline".
+    """
+    session_id = st.session_state.session_id
+    persisted = True
+    try:
+        store.record_scan(session_id, result)
+        row = store.find_scan(session_id, result["gtin"])
+        entry = _row_to_entry(row)
+    except Exception as exc:
+        if not is_connectivity_error(exc):
+            raise
+        logger.warning(
+            "Neon unreachable recording scan %s; queuing.", result.get("gtin"), exc_info=True
+        )
+        offline_queue.enqueue("record_scan", {"session_id": session_id, "result": result})
+        entry = _entry_from_result(result, scan_count=1)
+        persisted = False
+
+    st.session_state.last_result = {**result, "duplicate": False, "persisted": persisted}
+    st.session_state.scan_history.append(entry)
     st.session_state.scan_nonce += 1
 
 
@@ -225,9 +325,26 @@ def record_duplicate_scan(raw_gtin: str, gtin: str, existing: dict) -> None:
     "Duplicate handling". The KPI math in compute_stats() is still untouched
     by a rescan: it counts distinct history entries, and a rescan mutates an
     existing entry rather than adding one.
+
+    Same offline handling as record_scan(): a connectivity failure queues
+    the increment instead of raising, and the count shown locally is
+    incremented from what's already in session_state rather than read back
+    from the store.
     """
-    updated_row = store.increment_scan(st.session_state.session_id, gtin)
-    updated_entry = _row_to_entry(updated_row)
+    session_id = st.session_state.session_id
+    persisted = True
+    try:
+        updated_row = store.increment_scan(session_id, gtin)
+        updated_entry = _row_to_entry(updated_row)
+        new_scan_count = updated_row["scan_count"]
+    except Exception as exc:
+        if not is_connectivity_error(exc):
+            raise
+        logger.warning("Neon unreachable incrementing scan %s; queuing.", gtin, exc_info=True)
+        offline_queue.enqueue("increment_scan", {"session_id": session_id, "gtin": gtin})
+        new_scan_count = int(existing.get("Scan Count") or 1) + 1
+        updated_entry = {**existing, "Scan Count": new_scan_count, "pending_sync": True}
+        persisted = False
 
     for i, entry in enumerate(st.session_state.scan_history):
         if entry.get("gtin") == gtin:
@@ -253,7 +370,8 @@ def record_duplicate_scan(raw_gtin: str, gtin: str, existing: dict) -> None:
         "miss_label": existing.get("Miss Reason", ""),
         "miss_detail": existing.get("Miss Detail", ""),
         "duplicate": True,
-        "scan_count": updated_row["scan_count"],
+        "scan_count": new_scan_count,
+        "persisted": persisted,
     }
     st.session_state.scan_nonce += 1
 
