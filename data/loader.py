@@ -15,6 +15,7 @@ based on the DATA_SOURCE environment variable ("mock" | "fabric").
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from cryptography.fernet import Fernet, InvalidToken
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,6 +33,85 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 CACHE_PATH = Path(__file__).parent / "cache" / "contract_lines.parquet"
+
+# Beyond this age even a stale cache is refused rather than served — see
+# _read_cache()'s use in load_contract_data(). Deliberately much longer than
+# the 24h "fresh" TTL: the whole point of the stale-fallback path is
+# surviving a real Fabric/network outage, so this only guards against the
+# cache accumulating indefinitely on a device that never reconnects, per
+# ASVS-AUDIT.md finding #8 — it is not the normal-operation freshness check.
+_MAX_CACHE_AGE_SECONDS = 7 * 86400
+
+_CACHE_KEYRING_NAME = "contract_cache_key"
+_CACHE_FALLBACK_KEY_PATH = CACHE_PATH.parent / ".contract_cache_key"
+
+
+def _cache_key() -> bytes:
+    """Fernet key for the on-disk contract-data cache.
+
+    Same pattern as core.offline_queue._get_or_create_key: OS keychain
+    first (generating and persisting one there on first use), a local 0600
+    key file only if no keyring backend exists at all.
+    """
+    from core.secrets import from_keyring, store_in_keyring  # noqa: PLC0415
+
+    existing = from_keyring(_CACHE_KEYRING_NAME)
+    if existing:
+        return existing.encode()
+
+    key = Fernet.generate_key()
+    try:
+        store_in_keyring(_CACHE_KEYRING_NAME, key.decode())
+        return key
+    except Exception:  # noqa: BLE001 — no keyring backend; use the file fallback
+        logger.warning(
+            "No OS keychain backend available; falling back to a local key "
+            "file for the contract-data cache."
+        )
+    if _CACHE_FALLBACK_KEY_PATH.exists():
+        return _CACHE_FALLBACK_KEY_PATH.read_bytes()
+    _CACHE_FALLBACK_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _CACHE_FALLBACK_KEY_PATH.write_bytes(key)
+    _CACHE_FALLBACK_KEY_PATH.chmod(0o600)
+    return key
+
+
+def _write_cache(df: pd.DataFrame) -> None:
+    """Encrypt `df` (as Parquet) and write it to CACHE_PATH."""
+    buf = io.BytesIO()
+    df.to_parquet(buf)
+    token = Fernet(_cache_key()).encrypt(buf.getvalue())
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = CACHE_PATH.with_suffix(".tmp")
+    tmp_path.write_bytes(token)
+    tmp_path.replace(CACHE_PATH)
+
+
+def _read_cache(*, enforce_max_age: bool) -> pd.DataFrame | None:
+    """Decrypt and return the cached DataFrame, or None if it's missing,
+    unreadable, or (when `enforce_max_age`) older than _MAX_CACHE_AGE_SECONDS.
+
+    A missing key (keychain cleared, moved to a different host), a corrupted
+    file, or a pre-encryption plaintext leftover from before this cache was
+    encrypted all decrypt to InvalidToken — treated the same as "no cache",
+    since a lost retry costs a re-fetch, never correctness.
+    """
+    if not CACHE_PATH.exists():
+        return None
+    age_seconds = time.time() - CACHE_PATH.stat().st_mtime
+    if enforce_max_age and age_seconds > _MAX_CACHE_AGE_SECONDS:
+        logger.warning(
+            "Local contract-data cache is older than %d days; refusing to "
+            "serve it even as a stale fallback.", _MAX_CACHE_AGE_SECONDS // 86400,
+        )
+        return None
+    try:
+        token = CACHE_PATH.read_bytes()
+        raw = Fernet(_cache_key()).decrypt(token)
+        return pd.read_parquet(io.BytesIO(raw))
+    except (InvalidToken, OSError, ValueError):
+        logger.warning("Local contract-data cache is unreadable; treating it as absent.", exc_info=True)
+        return None
 
 # Candidate locations for the full mock dataset, tried in order by
 # _resolve_mock_dataset(). The repo-relative paths come first so a deployed
@@ -886,47 +967,51 @@ def _load_mock_from_excel() -> pd.DataFrame:
 
 @st.cache_data(ttl=86400, show_spinner="Fetching contract data…")
 def load_contract_data() -> pd.DataFrame:
-    """Load contract line data, preferring a local Parquet cache over live query.
+    """Load contract line data, preferring a local encrypted cache over a
+    live query.
 
     Checks if `data/cache/contract_lines.parquet` exists and is <24h old.
-    If so, returns it instantly.
-    Otherwise, queries the Fabric Lakehouse (or the mock source), saves to Parquet,
-    and returns. If the query fails but a stale Parquet file exists, it uses the
-    stale file as a fallback.
+    If so, returns it instantly. Otherwise, queries the Fabric Lakehouse (or
+    the mock source), saves to the cache, and returns. If the query fails
+    but a cached file still exists and isn't older than
+    _MAX_CACHE_AGE_SECONDS, it's used as a stale fallback — see
+    ASVS-AUDIT.md finding #8 for why that ceiling exists.
 
     Returns:
         pd.DataFrame: Contract line records.
     """
     source = os.getenv("DATA_SOURCE", "mock").lower().strip()
-    
-    # 1. Check local Parquet cache
+
+    # 1. Check local cache
     if CACHE_PATH.exists():
         file_age_seconds = time.time() - CACHE_PATH.stat().st_mtime
         if file_age_seconds < 86400:
-            logger.info("Reading contract data from local Parquet cache (age: %.1fh).", file_age_seconds / 3600)
-            return pd.read_parquet(CACHE_PATH)
+            cached = _read_cache(enforce_max_age=False)
+            if cached is not None:
+                logger.info("Reading contract data from local cache (age: %.1fh).", file_age_seconds / 3600)
+                return cached
         else:
-            logger.info("Local Parquet cache is stale (>24h). Will try to refresh from %s.", source)
+            logger.info("Local cache is stale (>24h). Will try to refresh from %s.", source)
     else:
-        logger.info("No local Parquet cache found. Will fetch fresh data from %s.", source)
-        
+        logger.info("No local cache found. Will fetch fresh data from %s.", source)
+
     # 2. Try fetching fresh data from source
     try:
         df = _fetch_fresh_data(source)
-        
-        # 3. Save successfully fetched data to Parquet
-        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(CACHE_PATH)
-        logger.info("Saved fresh data to local Parquet cache.")
+
+        # 3. Save successfully fetched data to the (encrypted) cache
+        _write_cache(df)
+        logger.info("Saved fresh data to local cache.")
         return df
-        
+
     except Exception as e:
         logger.exception("Failed to fetch fresh data from %s", source)
-        if CACHE_PATH.exists():
-            logger.warning("Falling back to stale local Parquet cache due to fetch failure.")
-            return pd.read_parquet(CACHE_PATH)
+        stale = _read_cache(enforce_max_age=True)
+        if stale is not None:
+            logger.warning("Falling back to stale local cache due to fetch failure.")
+            return stale
 
-        # No local cache and fetch failed -> raise
+        # No usable local cache and fetch failed -> raise
         raise RuntimeError(f"Failed to fetch data from {source} and no local cache exists.") from e
 
 
