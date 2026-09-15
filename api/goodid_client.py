@@ -23,8 +23,6 @@ from dataclasses import dataclass
 
 import httpx
 
-from core.egress import assert_allowed_url
-
 logger = logging.getLogger(__name__)
 
 _GUDID_LOOKUP_URL = "https://accessgudid.nlm.nih.gov/api/v2/devices/lookup.json"
@@ -67,6 +65,15 @@ def query_goodid(gtin: str) -> GoodIDResult:
     Example URL constructed:
         https://accessgudid.nlm.nih.gov/api/v2/devices/lookup.json?di=00841098765432
     """
+    # Lazy import: core.lookup imports `api` at module load, and core/__init__
+    # eagerly imports core.lookup — a module-level `from core.egress import
+    # ...` here would make api's own package import depend on core finishing
+    # its package import first, which isn't guaranteed by import order (e.g.
+    # `import api` before anything touches `core`). Deferring the import to
+    # call time breaks that cycle; core.egress itself has no import-time
+    # dependency on api, so this is safe regardless of who imports first.
+    from core.egress import assert_allowed_url  # noqa: PLC0415
+
     url = _GUDID_LOOKUP_URL
     assert_allowed_url(url)
     logger.info("AccessGUDID fallback query: GET %s", url)
