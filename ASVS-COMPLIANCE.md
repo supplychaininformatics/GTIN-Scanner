@@ -238,6 +238,29 @@ see below.
 
 ## Needs infra-level action (can't be fixed from inside this repo)
 
+0. **Four GitHub repo-settings toggles**, none of which a PR can carry
+   (Settings pages, not files) — added CI/Dependabot/CODEOWNERS/SECURITY.md
+   in a PR to cover everything that *can* live in the repo; these four are
+   what's left:
+   - **Branch protection on `main`** — currently none at all (checked via
+     `gh api repos/.../branches/main/protection` → 404 "Branch not
+     protected"): no required reviews, no required status checks, nothing
+     stopping a direct push or force-push. Once the CI workflow PR merges,
+     turn on "Require a pull request before merging" + "Require status
+     checks to pass" (select the new `Tests + lint + dependency audit`
+     check) + "Require review from Code Owners".
+   - **Dependabot alerts** — currently disabled (`vulnerability-alerts`
+     endpoint returns 404 "disabled"). This is GitHub's passive "a CVE was
+     published against something you use" notification, separate from the
+     `dependabot.yml` version-update PRs added in this PR. Settings →
+     Security → enable "Dependabot alerts".
+   - **Dependabot security updates** — also disabled; auto-PRs a fix when
+     an alert fires. Same Settings → Security page as above.
+   - **Private vulnerability reporting** — disabled (checked via `gh api
+     .../private-vulnerability-reporting` → `{"enabled": false}`).
+     SECURITY.md (added in this PR) references this but it needs enabling
+     at Settings → Security → Private vulnerability reporting before the
+     "Report a vulnerability" button actually appears.
 1. **Network-level egress restriction.** `core/egress.py` is the
    application-side control; actually preventing this app's host/container
    from reaching anything besides GUDID, the Fabric endpoint, and Neon
