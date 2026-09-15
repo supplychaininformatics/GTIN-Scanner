@@ -12,3 +12,16 @@ font = "sans serif"
 
 [server]
 headless = true
+
+[client]
+# Default OFF: an uncaught exception anywhere in the app (a Neon blip not
+# classified as a connectivity error, a Fabric/ODBC failure, a bug) would
+# otherwise render its full type, message and stack trace straight to the
+# picker's handheld screen — internal file paths, table/column names, and
+# driver error text included. See ASVS-AUDIT.md finding #6 / V7.4.
+#
+# Override locally while developing with:
+#   STREAMLIT_CLIENT_SHOWERRORDETAILS=full streamlit run app.py
+# rather than changing this file, so the safe default ships even if a
+# developer's own override is left in their shell.
+showErrorDetails = "none"
