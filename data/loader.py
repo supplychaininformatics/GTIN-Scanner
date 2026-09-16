@@ -117,7 +117,9 @@ def _read_cache(*, enforce_max_age: bool) -> pd.DataFrame | None:
         raw = Fernet(_cache_key()).decrypt(token)
         return pd.read_parquet(io.BytesIO(raw))
     except (InvalidToken, OSError, ValueError):
-        logger.warning("Local contract-data cache is unreadable; treating it as absent.", exc_info=True)
+        logger.warning(
+            "Local contract-data cache is unreadable; treating it as absent.", exc_info=True
+        )
         return None
 
 # Candidate locations for the full mock dataset, tried in order by
@@ -1025,7 +1027,9 @@ def load_contract_data() -> pd.DataFrame:
         if file_age_seconds < 86400:
             cached = _read_cache(enforce_max_age=False)
             if cached is not None:
-                logger.info("Reading contract data from local cache (age: %.1fh).", file_age_seconds / 3600)
+                logger.info(
+                    "Reading contract data from local cache (age: %.1fh).", file_age_seconds / 3600
+                )
                 return cached
         else:
             logger.info("Local cache is stale (>24h). Will try to refresh from %s.", source)

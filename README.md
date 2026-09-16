@@ -11,7 +11,8 @@ gtin-scanner/
 ├── app.py                    # Handheld scan page (start form + scan loop) — default page
 ├── pages/
 │   ├── board.py               # Monitor master board: today's sessions, drill-in, export, force-end
-│   └── admin.py               # Admin-only data refresh + force-end (email-allowlist gated)
+│   ├── admin.py               # Admin-only data refresh + force-end (email-allowlist gated)
+│   └── usage_dashboard.py     # Owner-only daily usage/anomaly + GoodID failure-rate dashboard
 ├── ui/
 │   ├── theme.py              # The single CSS injection + palette + JS runtime
 │   └── components.py         # header, kpi tiles, result card, pills, tables
@@ -20,7 +21,8 @@ gtin-scanner/
 │   ├── store.py              # Postgres (Neon) session/scan store — session & scan persistence
 │   ├── session.py            # Session state + scan history model, backed by core/store.py
 │   ├── export.py             # Excel writer (per-session, dynamic filename)
-│   └── admin.py               # Admin auth check + cache-refresh orchestration
+│   ├── admin.py               # Admin auth check + cache-refresh orchestration
+│   └── usage_stats.py         # GoodID lookup logging + daily-usage rollup/read for the dashboard
 ├── data/
 │   └── loader.py             # Fabric Lakehouse + Mock data (active by default)
 ├── engine/
@@ -30,14 +32,17 @@ gtin-scanner/
 ├── assets/
 │   └── sanford-logo.png      # Official mark — referenced, never redrawn
 ├── migrations/
-│   └── 001_initial.sql       # Neon Postgres schema for session/scan (run once, idempotent)
+│   ├── 001_initial.sql       # Neon Postgres schema for session/scan (run once, idempotent)
+│   └── 004_usage_dashboard.sql  # daily_usage_stats + goodid_lookup_log for the dashboard
 ├── scripts/
-│   └── purge_expired.sql     # Retention sweep, run by the daily GitHub Action below
+│   ├── purge_expired.sql     # Retention sweep, run by the daily GitHub Action below
+│   └── rollup_daily_stats.py # Nightly daily_usage_stats rollup, run by the GitHub Action below
 ├── .github/workflows/
-│   └── purge-expired.yml     # Daily cron: purges sessions/scans past the retention window
+│   ├── purge-expired.yml     # Daily cron: purges sessions/scans past the retention window
+│   └── rollup-daily-stats.yml # Daily cron: rolls up yesterday into daily_usage_stats
 ├── .streamlit/
 │   ├── config.toml           # Theme and server config
-│   └── secrets.toml.example  # Template for the Neon connection string + admin email allowlist
+│   └── secrets.toml.example  # Template: Neon URL + admin allowlist + dashboard owner email
 ├── .env.example              # Environment variable template
 └── pyproject.toml            # Project metadata and dependencies
 ```
@@ -62,6 +67,9 @@ the Database" below for connecting it):
 - **`pages/admin.py`** — data refresh (unchanged) plus the same Force End
   control, for supervisors who reach session management through the admin
   gate instead of the board.
+- **`pages/usage_dashboard.py`** — owner-only: today's usage vs. a daily
+  baseline and the GoodID fallback failure rate, so an abnormal day is
+  visible without a manual query. See "Usage Dashboard" below.
 
 Sessions and scans older than 3 days are purged automatically — export
 before then, since the 3-day window is the only backup (no offline queue,
@@ -365,6 +373,81 @@ when — the same data written to `data/cache/admin_audit.log`, one JSON
 record per line, also git-ignored). Each refresh is throttled by a 5-minute
 cooldown, tracked in `data/cache/refresh_meta.json` — cross-session, so it
 holds even if a different admin clicks it from another browser.
+
+---
+
+## Usage Dashboard
+
+`pages/usage_dashboard.py` is an owner-only daily-usage/security view: today's
+unique users, sessions, scans, and GoodID fallback failure rate, each checked
+against a rolling baseline so an abnormal day (a traffic spike that could be
+scripted/automated use, or a burst of GoodID failures) is flagged instead of
+requiring a manual query. Meant to be checked once a day, not left open.
+
+### Why it needs its own tables
+
+`session`/`scan` are purged after `core.store.RETENTION_DAYS` (3 days —
+`scripts/purge_expired.sql`), so there's no multi-week history in them to
+build a baseline from. `migrations/004_usage_dashboard.sql` adds two tables
+that aren't subject to that purge:
+
+- **`daily_usage_stats`** — one row per day, written by the nightly
+  `.github/workflows/rollup-daily-stats.yml` (`scripts/rollup_daily_stats.py`)
+  *before* that day's raw rows age out. This is what the dashboard's trend
+  chart and baseline read from.
+- **`goodid_lookup_log`** — one row per `api.goodid_client.query_goodid()`
+  call (success/failure, status code, error type — no GTIN or other scan
+  content), written live from the app. A burst of GoodID failures is a
+  stronger attack signal than a raw user-count spike, since the count of
+  "users" is just a self-reported Sanford ID typed at session start (see
+  below).
+
+Apply the new schema the same way as the others:
+
+```bash
+psql "$NEON_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_usage_dashboard.sql
+```
+
+### Access model: admin allowlist, narrowed to one owner
+
+The dashboard sits behind the same typed-email allowlist as the admin/board
+pages, *plus* a second check against a single `owner_email` — other
+supervisors on `[admin] allowed_emails` don't see this page even though they
+can reach the admin/board pages. See `core/admin.py`'s module docstring for
+the allowlist's own limits (typed-email, not verified identity) — the same
+caveat applies here.
+
+Add the owner's email to the same `.streamlit/secrets.toml` from the Admin
+Refresh Page setup above:
+
+```toml
+[dashboard]
+owner_email = "you@example.org"
+```
+
+`owner_email` must also be covered by `[admin] allowed_emails` or
+`allowed_domains` — the dashboard checks the general admin gate first, then
+this one.
+
+### Enabling the nightly rollup
+
+`.github/workflows/rollup-daily-stats.yml` reuses the `NEON_DATABASE_URL`
+repo secret `purge-expired.yml` already needs — no new secret to add. It's
+scheduled well ahead of the daily purge so there's no risk of the purge
+deleting a day's raw rows before the rollup has read them. Until it's run at
+least `MIN_HISTORY_DAYS` (5) times, the dashboard shows "not enough history
+yet" instead of a baseline — you can also trigger it manually from the
+Actions tab to backfill.
+
+### A spike in "users" isn't proof of an attack
+
+The Sanford ID a session is created with is self-reported at the start
+screen, not an authenticated login (see `app.py`), and nothing in this app
+captures request-level data like client IP. A jump in unique Sanford IDs is a
+real signal worth checking, but on its own it can't distinguish "many new
+people" from "one script reusing/incrementing an ID" — that's why the
+dashboard also tracks the GoodID failure rate: a scripted/automated caller
+hitting the scan flow would much more reliably show up there.
 
 ---
 

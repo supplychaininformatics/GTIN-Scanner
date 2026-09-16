@@ -37,8 +37,8 @@ from dotenv import load_dotenv
 from core import store
 from core.connectivity import is_connectivity_error
 from core.export import EXPORT_MIME, build_workbook, export_filename
-from core.offline_queue import find_pending_session
 from core.lookup import extract_gtin, get_lookup_engine, resolve_scan
+from core.offline_queue import find_pending_session
 from core.session import (
     clear_result,
     compute_stats,
