@@ -112,6 +112,7 @@ def query_goodid(gtin: str) -> GoodIDResult:
     from core.circuit_breaker import CircuitOpenError  # noqa: PLC0415
     from core.egress import assert_allowed_url  # noqa: PLC0415
     from core.logsafe import safe_log_value  # noqa: PLC0415
+    from core.usage_stats import record_goodid_lookup  # noqa: PLC0415
 
     url = _GUDID_LOOKUP_URL
     assert_allowed_url(url)
@@ -121,6 +122,7 @@ def query_goodid(gtin: str) -> GoodIDResult:
         breaker.before_call()
     except CircuitOpenError as exc:
         logger.warning(str(exc))
+        record_goodid_lookup(success=False, status_code=None, error_type="circuit_open")
         return GoodIDResult(
             success=False, gtin=gtin, payload={}, status_code=None, error_message=str(exc)
         )
@@ -128,6 +130,7 @@ def query_goodid(gtin: str) -> GoodIDResult:
     logger.info("AccessGUDID fallback query: GET %s", url)
 
     last_error: GoodIDResult | None = None
+    last_error_type = "unknown"
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
@@ -139,6 +142,9 @@ def query_goodid(gtin: str) -> GoodIDResult:
                     resp.status_code, safe_log_value(gtin),
                 )
                 breaker.record_success()
+                record_goodid_lookup(
+                    success=True, status_code=resp.status_code, error_type=None
+                )
                 return GoodIDResult(
                     success=True,
                     gtin=gtin,
@@ -153,6 +159,9 @@ def query_goodid(gtin: str) -> GoodIDResult:
             msg = f"AccessGUDID returned HTTP {exc.response.status_code}."
             logger.warning("%s Body: %s", msg, exc.response.text[:300])
             breaker.record_success()
+            record_goodid_lookup(
+                success=False, status_code=exc.response.status_code, error_type="http_status"
+            )
             return GoodIDResult(
                 success=False,
                 gtin=gtin,
@@ -166,11 +175,13 @@ def query_goodid(gtin: str) -> GoodIDResult:
                 success=False, gtin=gtin, payload={}, status_code=None,
                 error_message=f"AccessGUDID request timed out after {_TIMEOUT_SECONDS}s.",
             )
+            last_error_type = "timeout"
         except httpx.RequestError as exc:
             last_error = GoodIDResult(
                 success=False, gtin=gtin, payload={}, status_code=None,
                 error_message=f"Network error contacting AccessGUDID: {exc}",
             )
+            last_error_type = "network_error"
 
         # Only a timeout/connection-level failure reaches here (an
         # HTTPStatusError already returned above).
@@ -179,4 +190,5 @@ def query_goodid(gtin: str) -> GoodIDResult:
 
     breaker.record_failure()
     logger.warning(last_error.error_message)
+    record_goodid_lookup(success=False, status_code=None, error_type=last_error_type)
     return last_error
