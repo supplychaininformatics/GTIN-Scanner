@@ -78,7 +78,11 @@ inject_theme()
 loading_container = st.container()
 if "app_ready" not in st.session_state:
     with loading_container:
-        st.markdown('<div style="text-align:center;padding:2rem"><p style="color:var(--sf-muted);font-size:0.9rem">Loading app…</p></div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="text-align:center;padding:2rem">'
+            '<p style="color:var(--sf-muted);font-size:0.9rem">Loading app…</p></div>',
+            unsafe_allow_html=True,
+        )
 init_session()
 
 # ── Lazy-load the lookup engine only when a scan happens, not at startup ──────
