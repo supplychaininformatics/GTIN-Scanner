@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # Must match the interpreter requirements.lock.txt was generated
           # with — see that file's header. A version mismatch here isn't
