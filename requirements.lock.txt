@@ -18,11 +18,20 @@
 # requirements.txt instead; this file is for reproducing the full dev/CI
 # environment exactly.
 #
+# Locked with Python 3.13 specifically (matching both this repo's actual
+# dev .venv and the CI workflow's setup-python version) — NOT whatever
+# `python3`/`python -m venv` happens to resolve to on your machine. The
+# first attempt at this file was built under Python 3.14 and resolved
+# numpy==2.5.3, which requires Python >=3.12 — installing it under CI's
+# original Python 3.11 config failed outright. Pin the interpreter
+# explicitly when regenerating, or you'll reproduce that exact break.
+#
 # To use:
 #   pip install -r requirements.lock.txt
 #
 # To regenerate after bumping a version in pyproject.toml:
-#   python -m venv /tmp/lockenv && /tmp/lockenv/bin/pip install -e ".[fabric,dev]"
+#   /path/to/python3.13 -m venv /tmp/lockenv
+#   /tmp/lockenv/bin/pip install -e ".[fabric,dev]"
 #   /tmp/lockenv/bin/pip freeze --exclude-editable | sort > requirements.lock.txt
 #   pipx run pip-audit --format json  # (with PIPAPI_PYTHON_LOCATION set to
 #                                       /tmp/lockenv/bin/python) — re-verify
@@ -97,9 +106,9 @@ ruff==0.16.7
 six==1.17.0
 smmap==5.0.3
 starlette==1.6.0
-streamlit==1.63.0
+streamlit==1.64.0
 toml==0.10.2
 typing_extensions==4.16.0
-urllib3==2.7.0
+urllib3==2.8.0
 uvicorn==0.53.0
 websockets==16.1.1

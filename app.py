@@ -37,8 +37,8 @@ from dotenv import load_dotenv
 from core import store
 from core.connectivity import is_connectivity_error
 from core.export import EXPORT_MIME, build_workbook, export_filename
-from core.offline_queue import find_pending_session
 from core.lookup import extract_gtin, get_lookup_engine, resolve_scan
+from core.offline_queue import find_pending_session
 from core.session import (
     clear_result,
     compute_stats,
@@ -71,6 +71,18 @@ st.set_page_config(
 
 inject_theme()
 
+# ── Loading splash: show immediately while the app initializes ───────────────
+# Appears only once on cold start, replaced by actual content on next render.
+# This makes the "app is waking up" transition feel faster because the user
+# sees content quicker, even though backend work continues in parallel.
+loading_container = st.container()
+if "app_ready" not in st.session_state:
+    with loading_container:
+        st.markdown(
+            '<div style="text-align:center;padding:2rem">'
+            '<p style="color:var(--sf-muted);font-size:0.9rem">Loading app…</p></div>',
+            unsafe_allow_html=True,
+        )
 init_session()
 
 # ── Lazy-load the lookup engine only when a scan happens, not at startup ──────
@@ -413,3 +425,6 @@ scanner_runtime(
     kind=last["status_key"] if last else None,
     sound_on=st.session_state.sound_on,
 )
+
+# Mark the app as ready so the loading splash doesn't show on next render
+st.session_state.app_ready = True

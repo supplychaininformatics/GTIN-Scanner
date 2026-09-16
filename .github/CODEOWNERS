@@ -1,0 +1,22 @@
+# .github/CODEOWNERS
+#
+# One collaborator on this repo as of this writing (supplychaininformatics),
+# so this file is currently scaffolding more than an active review gate —
+# its real value kicks in the moment a second person is added as a
+# collaborator and this becomes the thing branch protection's "required
+# reviewers" rule actually enforces. Update the owner(s) below as the team
+# grows; a blanket "*" entry is a reasonable default until code areas need
+# distinct owners.
+
+* @supplychaininformatics
+
+# Security-relevant surfaces get called out explicitly so a future review
+# of just this file makes it obvious what's considered sensitive, even
+# before ownership diverges from the blanket rule above.
+/core/secrets.py        @supplychaininformatics
+/core/egress.py         @supplychaininformatics
+/core/offline_queue.py  @supplychaininformatics
+/core/admin.py          @supplychaininformatics
+/.streamlit/            @supplychaininformatics
+/ASVS-AUDIT.md          @supplychaininformatics
+/ASVS-COMPLIANCE.md     @supplychaininformatics

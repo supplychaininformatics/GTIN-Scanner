@@ -1,0 +1,78 @@
+# .github/workflows/ci.yml
+#
+# The security remediation done in ASVS-AUDIT.md / ASVS-COMPLIANCE.md fixed
+# the application, but nothing previously stopped a future change from
+# silently regressing any of it — this repo had no CI at all before this
+# workflow (see .github/workflows/purge-expired.yml, which is an unrelated
+# daily data-retention cron, not a build/test gate). This is that gate.
+#
+# What's blocking (fails the build) vs. informational, and why:
+#   - tests, ruff:  both clean as of the commit that added this workflow —
+#     safe to block on immediately.
+#   - pip-audit:    blocks on any known vulnerability in a dependency this
+#     repo actually ships (requirements.lock.txt) — the point of finding
+#     and fixing 5 vulnerable packages in the audit was to not silently
+#     reintroduce one later.
+#   - mypy:         informational only (`continue-on-error: true`). The
+#     codebase has ~248 pre-existing strict-mode errors (mostly missing
+#     type annotations in tests, predating this workflow) that were out of
+#     scope to fix as a side effect of adding CI. Flip this to blocking once
+#     that backlog is cleared — tracked, not silently dropped.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests + lint + dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Must match the interpreter requirements.lock.txt was generated
+          # with — see that file's header. A version mismatch here isn't
+          # theoretical: the first version of this workflow used 3.11 while
+          # the lock file had been resolved under 3.14, which had picked
+          # numpy==2.5.3 (requires Python >=3.12) and failed outright in CI.
+          python-version: "3.13"
+          cache: "pip"
+
+      # requirements.lock.txt is the exact, pip-audit-verified set (see its
+      # own header for how it's generated) — CI installs from it rather than
+      # the loose pyproject.toml ranges, so "what CI tested" and "what's
+      # pinned as known-good" are the same thing.
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock.txt
+          pip install -e . --no-deps
+
+      - name: Ruff (lint)
+        run: python -m ruff check .
+
+      - name: pytest
+        run: python -m pytest tests/ -v
+
+      - name: pip-audit (dependency vulnerability scan)
+        run: pipx run pip-audit -r requirements.lock.txt
+
+      - name: mypy (informational — not yet a blocking gate)
+        continue-on-error: true
+        run: |
+          pip install mypy
+          python -m mypy . || true

@@ -1,0 +1,63 @@
+# .github/workflows/rollup-daily-stats.yml
+# Nightly rollup into daily_usage_stats, powering the owner-only usage
+# dashboard's history/baseline (pages/usage_dashboard.py) — see
+# migrations/004_usage_dashboard.sql for why that table has to exist
+# separately from `session`/`scan`, which are purged after
+# core.store.RETENTION_DAYS (3 days).
+#
+# Scheduled well before purge-expired.yml's 08:17 UTC run, so yesterday's raw
+# rows are never at risk of being purged before this has rolled them up —
+# with a 3-day retention window there's slack either way, but there's no
+# reason to cut it close.
+#
+# ⚠ GitHub disables scheduled workflows in a repository with no commit
+# activity for 60 days, and emails the repo admins when it does — same caveat
+# as purge-expired.yml.
+
+name: Roll up daily usage stats
+
+on:
+  schedule:
+    - cron: "5 6 * * *"
+  # Lets you backfill or recompute a specific day from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "Day to roll up (YYYY-MM-DD). Leave blank for yesterday (UTC)."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# Same reasoning as purge-expired.yml: a rollup isn't worth queueing behind
+# another rollup, and rollup_day() is an idempotent upsert either way.
+concurrency:
+  group: rollup-daily-stats
+  cancel-in-progress: false
+
+jobs:
+  rollup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the package
+        run: pip install -e .
+
+      - name: Compute and upsert the day's row
+        env:
+          # Repo secret: Settings → Secrets and variables → Actions. Same
+          # value purge-expired.yml uses.
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          if [ -z "$NEON_DATABASE_URL" ]; then
+            echo "::error::NEON_DATABASE_URL secret is not set — nothing was rolled up."
+            exit 1
+          fi
+          python scripts/rollup_daily_stats.py ${{ inputs.day }}

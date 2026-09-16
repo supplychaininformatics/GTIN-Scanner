@@ -145,7 +145,9 @@ def _prune(entries: list[dict]) -> list[dict]:
         )
     if len(fresh) > _MAX_QUEUE_SIZE:
         overflow = len(fresh) - _MAX_QUEUE_SIZE
-        logger.warning("Offline queue exceeded %d entries; dropping the %d oldest.", _MAX_QUEUE_SIZE, overflow)
+        logger.warning(
+            "Offline queue exceeded %d entries; dropping the %d oldest.", _MAX_QUEUE_SIZE, overflow
+        )
         fresh = fresh[overflow:]
     return fresh
 
@@ -190,7 +192,9 @@ def find_pending_session(session_id: str) -> dict | None:
     for entry in entries:
         if entry["op"] == "create_session" and entry["args"].get("session_id") == session_id:
             args = entry["args"]
-            created_at = datetime.fromtimestamp(entry["ts"], tz=UTC).replace(microsecond=0).isoformat()
+            created_at = (
+                datetime.fromtimestamp(entry["ts"], tz=UTC).replace(microsecond=0).isoformat()
+            )
             return {
                 "session_id": session_id,
                 "sanford_id": args["sanford_id"],
