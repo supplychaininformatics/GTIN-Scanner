@@ -89,7 +89,7 @@ pillow==12.3.0
 pluggy==1.6.0
 protobuf==7.36.2
 psycopg-binary==3.3.5
-psycopg-pool==3.3.1
+psycopg-pool==3.3.2
 psycopg==3.3.5
 pyarrow==25.0.1
 pycparser==3.0
