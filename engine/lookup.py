@@ -173,6 +173,14 @@ class LookupEngine:
                 best, best_core = shared, neighbour
         return best, best_core
 
+    def entries(self) -> list[tuple[str, dict]]:
+        """Every (index key, contract-line record) pair, sorted by key.
+
+        The keys are exactly what search() matches on, so a client mirroring
+        these pairs can resolve a scan with the same exact-match lookup.
+        """
+        return sorted(self._index.items())
+
     @staticmethod
     def _clean_gtin(value: object) -> str:
         """Normalise a GTIN cell to a lookup key, or '' if empty/NaN.

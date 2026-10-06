@@ -451,6 +451,17 @@ hitting the scan flow would much more reliably show up there.
 
 ---
 
+## Handheld Sync API (offline-first clients)
+
+`sync_api/` is a separate REST service that lets an offline-first handheld
+client mirror the contract lines, queue scans with no network, and upload them
+when it reconnects. It runs alongside the Streamlit app (`uvicorn
+sync_api.app:create_app --factory`), needs migration
+`migrations/005_device_api.sql`, and authenticates each handheld with its own
+revocable token (`python -m scripts.manage_devices add "<label>"`). The full
+client contract, error semantics, and security properties are in
+[SYNC-API.md](SYNC-API.md).
+
 ## goodID / AccessGUDID API
 
 The fallback API is the **FDA AccessGUDID** (Automated Identification and Data Capture GUDID) — a publicly accessible database of medical device identifiers maintained by the U.S. National Library of Medicine.

@@ -10,13 +10,13 @@
     "semantic_hash": ""
   },
   "api/goodid_client.py": {
-    "mtime": 1789537414.681549,
+    "mtime": 1789537860.5006526,
     "ast_hash": "9bb8f1cb46284c9c73b3191f65ec6519",
     "semantic_hash": ""
   },
   "app.py": {
-    "mtime": 1789537476.7372963,
-    "ast_hash": "8a75257b9bf24157f0351380a82a4c0c",
+    "mtime": 1789537860.5012069,
+    "ast_hash": "2f49cdc4299b35460f8347beb896ba3e",
     "semantic_hash": ""
   },
   "core/__init__.py": {
@@ -35,8 +35,8 @@
     "semantic_hash": ""
   },
   "core/lookup.py": {
-    "mtime": 1789432465.313716,
-    "ast_hash": "27495e5b6e09bd1484c0ca352e2ffbfa",
+    "mtime": 1790185912.8994052,
+    "ast_hash": "608913a8139fa6f86b2b2bb1b351b165",
     "semantic_hash": ""
   },
   "core/session.py": {
@@ -45,8 +45,8 @@
     "semantic_hash": ""
   },
   "core/store.py": {
-    "mtime": 1789432543.332639,
-    "ast_hash": "8410f09f1e76407b68a3360a6fcda51e",
+    "mtime": 1790185970.413311,
+    "ast_hash": "6ab77919219097f7ece104aa5cb106dd",
     "semantic_hash": ""
   },
   "data/__init__.py": {
@@ -55,7 +55,7 @@
     "semantic_hash": ""
   },
   "data/loader.py": {
-    "mtime": 1789537518.1377726,
+    "mtime": 1789537860.504594,
     "ast_hash": "5354404c57fe561de8d8ae33993479a7",
     "semantic_hash": ""
   },
@@ -65,8 +65,8 @@
     "semantic_hash": ""
   },
   "engine/lookup.py": {
-    "mtime": 1788202772.2509308,
-    "ast_hash": "67d3687bda241c8d8cb8d660b3dd5498",
+    "mtime": 1790185904.4907253,
+    "ast_hash": "a0f3f22fd4cc0ae5d69efbfd07aa2deb",
     "semantic_hash": ""
   },
   "migrations/001_initial.sql": {
@@ -85,8 +85,8 @@
     "semantic_hash": ""
   },
   "pyproject.toml": {
-    "mtime": 1789537414.7226472,
-    "ast_hash": "417e4edf4309d0bba2aa2534b1c8395e",
+    "mtime": 1790186131.7646139,
+    "ast_hash": "89401ed212b5b939018ac3615d07368d",
     "semantic_hash": ""
   },
   "scripts/purge_expired.sql": {
@@ -100,12 +100,12 @@
     "semantic_hash": ""
   },
   "ui/components.py": {
-    "mtime": 1789537414.7259986,
+    "mtime": 1789537860.5318825,
     "ast_hash": "117736bc1318fef72a2fdb917e65ebf3",
     "semantic_hash": ""
   },
   "ui/theme.py": {
-    "mtime": 1789537386.7471983,
+    "mtime": 1789537860.533538,
     "ast_hash": "77e78215db19dca1c3cd781c975eb8c6",
     "semantic_hash": ""
   },
@@ -130,13 +130,13 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1789537414.6807413,
-    "ast_hash": "72fad20ddb94e21372c24cda77963805",
+    "mtime": 1790186495.761818,
+    "ast_hash": "1b96e7dd9266ac0c956187d0ae7ca3ab",
     "semantic_hash": ""
   },
   "requirements.txt": {
-    "mtime": 1789432742.1637056,
-    "ast_hash": "c02d7b72f02915678104c7ed1ba0578a",
+    "mtime": 1790186118.359822,
+    "ast_hash": "fb2693abc050288b3769c3aca3348a37",
     "semantic_hash": ""
   },
   "assets/sanford-logo.png": {
@@ -185,7 +185,7 @@
     "semantic_hash": ""
   },
   "core/offline_queue.py": {
-    "mtime": 1789537414.6843004,
+    "mtime": 1789537860.502944,
     "ast_hash": "0cddaab719bf0ea753c7c3b818114d44",
     "semantic_hash": ""
   },
@@ -195,22 +195,22 @@
     "semantic_hash": ""
   },
   "core/usage_stats.py": {
-    "mtime": 1789537414.684819,
+    "mtime": 1789537860.5036077,
     "ast_hash": "49d4793ef83a00965fd037e2a6d5a6fc",
     "semantic_hash": ""
   },
   "migrations/004_usage_dashboard.sql": {
-    "mtime": 1789537414.721906,
+    "mtime": 1789537860.5242448,
     "ast_hash": "84a06664edb761f0f3dfbd3100b3cfb9",
     "semantic_hash": ""
   },
   "pages/usage_dashboard.py": {
-    "mtime": 1789537414.7221406,
+    "mtime": 1789537860.5251534,
     "ast_hash": "3f064f35b0c3138bb5606f2b68938b44",
     "semantic_hash": ""
   },
   "scripts/rollup_daily_stats.py": {
-    "mtime": 1789537414.7233603,
+    "mtime": 1789537860.526717,
     "ast_hash": "77425a947a4871044d4af51e5aacce78",
     "semantic_hash": ""
   },
@@ -245,7 +245,7 @@
     "semantic_hash": ""
   },
   "tests/test_egress.py": {
-    "mtime": 1789537414.723939,
+    "mtime": 1789537860.5277228,
     "ast_hash": "fbd59a60b12f9e9cd9e54c7d7fb0162b",
     "semantic_hash": ""
   },
@@ -260,7 +260,7 @@
     "semantic_hash": ""
   },
   "tests/test_goodid_resilience.py": {
-    "mtime": 1789537414.7242522,
+    "mtime": 1789537860.5289521,
     "ast_hash": "78a6528c485eac3fd891fead315d90a8",
     "semantic_hash": ""
   },
@@ -275,7 +275,7 @@
     "semantic_hash": ""
   },
   "tests/test_offline_queue.py": {
-    "mtime": 1789537414.7248893,
+    "mtime": 1789537860.5298502,
     "ast_hash": "9234cc517483ac7fef23c644abe9cb5c",
     "semantic_hash": ""
   },
@@ -305,27 +305,27 @@
     "semantic_hash": ""
   },
   "tests/test_tls_enforcement.py": {
-    "mtime": 1789537414.7252378,
+    "mtime": 1789537860.5308752,
     "ast_hash": "7ef800f63da29c05e536bbfc06ff9cf4",
     "semantic_hash": ""
   },
   "tests/test_usage_stats.py": {
-    "mtime": 1789537414.7253926,
+    "mtime": 1789537860.531235,
     "ast_hash": "b5071858c4eb19e54b860899747b45af",
     "semantic_hash": ""
   },
   ".github/dependabot.yml": {
-    "mtime": 1789537414.6775336,
+    "mtime": 1789537860.4964352,
     "ast_hash": "b06af284dfb9d1d711a36e535007925e",
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1789537414.678116,
+    "mtime": 1789537860.4970589,
     "ast_hash": "3bbeb8b4df02abea9c3cf0a3e8989691",
     "semantic_hash": ""
   },
   ".github/workflows/rollup-daily-stats.yml": {
-    "mtime": 1789537414.6783926,
+    "mtime": 1789537860.4974892,
     "ast_hash": "14ad7af6c3e775bd998314d10d0a60e5",
     "semantic_hash": ""
   },
@@ -335,23 +335,203 @@
     "semantic_hash": ""
   },
   "ASVS-COMPLIANCE.md": {
-    "mtime": 1789537414.679574,
-    "ast_hash": "9540f45c58bb7a49359e058442ec2407",
+    "mtime": 1790101187.4505663,
+    "ast_hash": "24269635e85ee57603eab4a245f0d800",
     "semantic_hash": ""
   },
   "SECURITY.md": {
-    "mtime": 1789537414.681035,
+    "mtime": 1789537860.500347,
     "ast_hash": "e336b49ab691dd746742eff9d0d8ab82",
     "semantic_hash": ""
   },
   "requirements.lock.txt": {
-    "mtime": 1789537414.7231188,
+    "mtime": 1789537860.5261314,
     "ast_hash": "e17de854c6ca40371fe74ead80440d89",
     "semantic_hash": ""
   },
   "GTIN-Scanner-Design-Brief.pdf": {
     "mtime": 1788204763.1218245,
     "ast_hash": "f2ab8fd6a0328909a39aabd35ca8d90f",
+    "semantic_hash": ""
+  },
+  "migrations/005_device_api.sql": {
+    "mtime": 1790185970.4191144,
+    "ast_hash": "9782798250fab49acd1298a5a2856366",
+    "semantic_hash": ""
+  },
+  "scripts/manage_devices.py": {
+    "mtime": 1790186118.3869097,
+    "ast_hash": "aeeaf5b03b773f9f55f61fe0a397a21b",
+    "semantic_hash": ""
+  },
+  "sync_api/__init__.py": {
+    "mtime": 1790185978.891183,
+    "ast_hash": "2de4c1b37c5eaa34989876fbaa1366e2",
+    "semantic_hash": ""
+  },
+  "sync_api/app.py": {
+    "mtime": 1790186281.7012396,
+    "ast_hash": "bfdd003f2b3ff91ff1a084293f6b4051",
+    "semantic_hash": ""
+  },
+  "sync_api/auth.py": {
+    "mtime": 1790185987.6965964,
+    "ast_hash": "d8d2a007fee81f9f7d3787db3fdcc845",
+    "semantic_hash": ""
+  },
+  "sync_api/reference.py": {
+    "mtime": 1790186412.822949,
+    "ast_hash": "e211bdefbc1796cf9aecbb58abffa620",
+    "semantic_hash": ""
+  },
+  "sync_api/sync.py": {
+    "mtime": 1790186220.627028,
+    "ast_hash": "300e6671967ec0c32c96853a57cab610",
+    "semantic_hash": ""
+  },
+  "tests/test_sync_api.py": {
+    "mtime": 1790187611.1756618,
+    "ast_hash": "d4b5160ebf6b9638605e0392cfcc371d",
+    "semantic_hash": ""
+  },
+  "SYNC-API.md": {
+    "mtime": 1790188130.6994936,
+    "ast_hash": "482d3e427f68230f44bde508c0e9cd92",
+    "semantic_hash": ""
+  },
+  "android/app/build.gradle.kts": {
+    "mtime": 1790188067.5640433,
+    "ast_hash": "148f98288e090c879232465a625bcbca",
+    "semantic_hash": ""
+  },
+  "android/app/src/main/kotlin/com/sanford/gtinscanner/app/Config.kt": {
+    "mtime": 1790188000.6951318,
+    "ast_hash": "224eacdd855377101efdd84e5b6c0646",
+    "semantic_hash": ""
+  },
+  "android/app/src/main/kotlin/com/sanford/gtinscanner/app/DataWedge.kt": {
+    "mtime": 1790188033.7589989,
+    "ast_hash": "770e93ea122af435aeabbc9c2a267453",
+    "semantic_hash": ""
+  },
+  "android/app/src/main/kotlin/com/sanford/gtinscanner/app/Database.kt": {
+    "mtime": 1790188000.7010279,
+    "ast_hash": "d3e8fb2ed4c51c3871f16ed265493540",
+    "semantic_hash": ""
+  },
+  "android/app/src/main/kotlin/com/sanford/gtinscanner/app/GtinScannerApp.kt": {
+    "mtime": 1790188033.7550943,
+    "ast_hash": "f67362669bd78caf85e0e5a371899575",
+    "semantic_hash": ""
+  },
+  "android/app/src/main/kotlin/com/sanford/gtinscanner/app/MainActivity.kt": {
+    "mtime": 1790188033.7633104,
+    "ast_hash": "91bd4742e1634a3db25d6fcbe81b236a",
+    "semantic_hash": ""
+  },
+  "android/app/src/main/kotlin/com/sanford/gtinscanner/app/SyncWork.kt": {
+    "mtime": 1790188000.703378,
+    "ast_hash": "7fb259766dd1becab89f653d18d1c937",
+    "semantic_hash": ""
+  },
+  "android/build.gradle.kts": {
+    "mtime": 1790187629.3824952,
+    "ast_hash": "61c672d745362c54f7d7e82a0020232b",
+    "semantic_hash": ""
+  },
+  "android/core/build.gradle.kts": {
+    "mtime": 1790187629.386999,
+    "ast_hash": "e213822ad8fbe818de8dfb5535dad764",
+    "semantic_hash": ""
+  },
+  "android/core/src/main/kotlin/com/sanford/gtinscanner/core/Gs1.kt": {
+    "mtime": 1790187653.274168,
+    "ast_hash": "c86421d50b667e616fd735b56a081b45",
+    "semantic_hash": ""
+  },
+  "android/core/src/main/kotlin/com/sanford/gtinscanner/core/HttpUrlConnectionTransport.kt": {
+    "mtime": 1790187690.6612263,
+    "ast_hash": "acf2a9b9b9e6051022a5055e463ecd18",
+    "semantic_hash": ""
+  },
+  "android/core/src/main/kotlin/com/sanford/gtinscanner/core/Interfaces.kt": {
+    "mtime": 1790187690.6615512,
+    "ast_hash": "2b97d77e2de8a0326dc42ed52e2319fb",
+    "semantic_hash": ""
+  },
+  "android/core/src/main/kotlin/com/sanford/gtinscanner/core/MirrorUpdater.kt": {
+    "mtime": 1790187690.6675568,
+    "ast_hash": "bb298ea3d125aa8d5318ac423d9985dd",
+    "semantic_hash": ""
+  },
+  "android/core/src/main/kotlin/com/sanford/gtinscanner/core/Models.kt": {
+    "mtime": 1790187653.267499,
+    "ast_hash": "9f2f883e789003d13c97d975705c4494",
+    "semantic_hash": ""
+  },
+  "android/core/src/main/kotlin/com/sanford/gtinscanner/core/ScanController.kt": {
+    "mtime": 1790187690.6724834,
+    "ast_hash": "78261cd411f3aed7c041ba8db59c4d90",
+    "semantic_hash": ""
+  },
+  "android/core/src/main/kotlin/com/sanford/gtinscanner/core/SyncEngine.kt": {
+    "mtime": 1790187690.670076,
+    "ast_hash": "fd20409065d42bf3fa80d880750aff00",
+    "semantic_hash": ""
+  },
+  "android/core/src/test/kotlin/com/sanford/gtinscanner/core/Fakes.kt": {
+    "mtime": 1790187870.5682216,
+    "ast_hash": "7387a74ebeac0524f45af38ba2aaaf26",
+    "semantic_hash": ""
+  },
+  "android/core/src/test/kotlin/com/sanford/gtinscanner/core/Gs1Test.kt": {
+    "mtime": 1790187761.7213724,
+    "ast_hash": "13e2fe9e77e72371f5fc6b417ba38e83",
+    "semantic_hash": ""
+  },
+  "android/core/src/test/kotlin/com/sanford/gtinscanner/core/LiveServerTest.kt": {
+    "mtime": 1790187870.575843,
+    "ast_hash": "ede6395208581b5254abcdc2ee16cc06",
+    "semantic_hash": ""
+  },
+  "android/core/src/test/kotlin/com/sanford/gtinscanner/core/MirrorUpdaterTest.kt": {
+    "mtime": 1790187828.370738,
+    "ast_hash": "7fe0decc237078503394d32856973fff",
+    "semantic_hash": ""
+  },
+  "android/core/src/test/kotlin/com/sanford/gtinscanner/core/ScanControllerTest.kt": {
+    "mtime": 1790187795.6050498,
+    "ast_hash": "f7d5865606a835ebbac8805f8c24fe33",
+    "semantic_hash": ""
+  },
+  "android/core/src/test/kotlin/com/sanford/gtinscanner/core/SyncEngineTest.kt": {
+    "mtime": 1790187761.7271624,
+    "ast_hash": "29b1ce24392ad793abaef6a655ad8076",
+    "semantic_hash": ""
+  },
+  "android/gradlew": {
+    "mtime": 1790187789.1129904,
+    "ast_hash": "f092910dfa8e47c5a37a452c3f6baf8a",
+    "semantic_hash": ""
+  },
+  "android/settings.gradle.kts": {
+    "mtime": 1790187629.3801198,
+    "ast_hash": "e4229a534de02a3a3abffdee62ac1a54",
+    "semantic_hash": ""
+  },
+  "sync_api/dev_server.py": {
+    "mtime": 1790187611.175781,
+    "ast_hash": "12d200506df469c424b24366317b7050",
+    "semantic_hash": ""
+  },
+  "sync_api/memory_store.py": {
+    "mtime": 1790187611.1493368,
+    "ast_hash": "b873a114337f4965407deff1378c4b7f",
+    "semantic_hash": ""
+  },
+  "android/README.md": {
+    "mtime": 1790188130.6684172,
+    "ast_hash": "ecf3f6f1079c5201bc890bc01b883628",
     "semantic_hash": ""
   }
 }

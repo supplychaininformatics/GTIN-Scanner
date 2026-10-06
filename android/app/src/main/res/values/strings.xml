@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GTIN Scanner</string>
+    <string name="restriction_sync_url">Sync service URL</string>
+    <string name="restriction_sync_url_desc">HTTPS base URL of the internal sync service, e.g. https://gtin-sync.sanford.internal</string>
+    <string name="restriction_sync_token">Device token</string>
+    <string name="restriction_sync_token_desc">Per-device bearer token from scripts/manage_devices.py add</string>
+</resources>

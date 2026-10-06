@@ -100,6 +100,35 @@ def _field_any(record: dict, *keys: str) -> str:
     return _MISSING
 
 
+def contract_display_fields(record: dict) -> dict[str, str]:
+    """The display fields shown for a contract-line hit, from a raw record.
+
+    Single source of truth for both resolve_scan() and the on-device reference
+    snapshot (sync_api/reference.py), so a handheld scanning offline shows
+    exactly what the server would have shown.
+    """
+    return {
+        "Item": _field(record, "vendor_item"),
+        "Company": _field_any(record, "manufacturer_name", "manufacturer_code"),
+        "Brand": _field(record, "manufacturer_number"),
+        "Description": " ".join(
+            str(x)
+            for x in (
+                record.get("item_description"),
+                record.get("item_description2"),
+                record.get("item_description3"),
+            )
+            if not pd.isna(x) and str(x).strip()
+        )
+        or _MISSING,
+        "GTIN UOM": _field(record, "uom_unit_of_measure"),
+        "UOU": _field(record, "low_uom_code_unit_of_measure"),
+        "HIBCC": "-",
+        "LAWSON ID": _field(record, "item_number"),
+        "Lawson UOM": _field(record, "low_uom_code_unit_of_measure"),
+    }
+
+
 def extract_gtin(scanned_code: str) -> str:
     """Extract a 14-digit GTIN from a composite GS1 barcode."""
     code = scanned_code.strip()
@@ -136,27 +165,19 @@ def resolve_scan(
 
     if record is not None:
         logger.info("Cache HIT for GTIN %s", safe_log_value(gtin))
+        fields = contract_display_fields(record)
         full_record = {
             "Scan": raw_gtin,
-            "Item": _field(record, "vendor_item"),
-            "Company": _field_any(record, "manufacturer_name", "manufacturer_code"),
-            "Brand": _field(record, "manufacturer_number"),
-            "Description": " ".join(
-                str(x)
-                for x in (
-                    record.get("item_description"),
-                    record.get("item_description2"),
-                    record.get("item_description3"),
-                )
-                if not pd.isna(x) and str(x).strip()
-            )
-            or _MISSING,
+            "Item": fields["Item"],
+            "Company": fields["Company"],
+            "Brand": fields["Brand"],
+            "Description": fields["Description"],
             "GTIN": gtin,
-            "GTIN UOM": _field(record, "uom_unit_of_measure"),
-            "UOU": _field(record, "low_uom_code_unit_of_measure"),
-            "HIBCC": "-",
-            "LAWSON ID": _field(record, "item_number"),
-            "Lawson UOM": _field(record, "low_uom_code_unit_of_measure"),
+            "GTIN UOM": fields["GTIN UOM"],
+            "UOU": fields["UOU"],
+            "HIBCC": fields["HIBCC"],
+            "LAWSON ID": fields["LAWSON ID"],
+            "Lawson UOM": fields["Lawson UOM"],
         }
         on_hold = bool(record.get("on_hold"))
         return {

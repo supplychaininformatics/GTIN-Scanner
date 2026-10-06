@@ -397,38 +397,41 @@ def find_scan(session_id: str, gtin: str) -> dict | None:
         return _row(cur.fetchone())
 
 
+def _insert_scan(cur: psycopg.Cursor, session_id: str, result: dict, at: datetime) -> None:
+    full_record = result["full_record"]
+    cur.execute(
+        "INSERT INTO scan (session_id, scanned_at, last_scanned, scan_count, "
+        "gtin, raw_scan, status_key, source, on_hold, miss_reason, "
+        "miss_detail, item, company, brand, "
+        "description, gtin_uom, uou, hibcc, lawson_id, lawson_uom) "
+        "VALUES (%s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+        "%s, %s, %s, %s, %s)",
+        (
+            session_id,
+            at,
+            at,
+            result["gtin"],
+            full_record.get("Scan", result["gtin"]),
+            result["status_key"],
+            result["source_label"],
+            bool(result["on_hold"]),
+            # NULL on a contract hit — see migrations/002_miss_reason.sql.
+            # .get() rather than [] so a caller building a result dict by
+            # hand (tests, the duplicate path) is not forced to carry keys
+            # that only ever describe a miss.
+            result.get("miss_reason"),
+            result.get("miss_detail"),
+            *(full_record.get(label, "") for _, label in _FULL_RECORD_COLUMNS),
+        ),
+    )
+
+
 def record_scan(session_id: str, result: dict) -> None:
     """Insert a new scan row. Caller (core/session.py) has already checked
     find_scan() and only calls this on a first-time GTIN for the session —
     a rescan goes through increment_scan() instead."""
-    now = _utcnow()
-    full_record = result["full_record"]
     with _cursor() as cur:
-        cur.execute(
-            "INSERT INTO scan (session_id, scanned_at, last_scanned, scan_count, "
-            "gtin, raw_scan, status_key, source, on_hold, miss_reason, "
-            "miss_detail, item, company, brand, "
-            "description, gtin_uom, uou, hibcc, lawson_id, lawson_uom) "
-            "VALUES (%s, %s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s, %s, %s, %s)",
-            (
-                session_id,
-                now,
-                now,
-                result["gtin"],
-                full_record.get("Scan", result["gtin"]),
-                result["status_key"],
-                result["source_label"],
-                bool(result["on_hold"]),
-                # NULL on a contract hit — see migrations/002_miss_reason.sql.
-                # .get() rather than [] so a caller building a result dict by
-                # hand (tests, the duplicate path) is not forced to carry keys
-                # that only ever describe a miss.
-                result.get("miss_reason"),
-                result.get("miss_detail"),
-                *(full_record.get(label, "") for _, label in _FULL_RECORD_COLUMNS),
-            ),
-        )
+        _insert_scan(cur, session_id, result, _utcnow())
 
 
 def increment_scan(session_id: str, gtin: str) -> dict:
@@ -444,6 +447,171 @@ def increment_scan(session_id: str, gtin: str) -> dict:
             (_utcnow(), session_id, gtin),
         )
         return _row(cur.fetchone())
+
+
+# ── Device API (sync_api/) ───────────────────────────────────────────────────
+# Everything below backs the REST service handhelds sync through. Kept apart
+# from the Streamlit-facing functions above because its contract differs:
+# every write is idempotent (a device retries a batch until it hears back) and
+# every write is checked against the calling device's identity.
+SYNC_APPLIED = "applied"
+SYNC_DUPLICATE = "duplicate"
+
+
+class SyncRejected(Exception):
+    """This op can never succeed as sent — the device should drop it."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+class SyncRetry(Exception):
+    """This op could not be applied right now but may succeed later."""
+
+
+def create_device(device_id: str, label: str, token_hash: str) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "INSERT INTO api_device (device_id, label, token_hash, created_at) "
+            "VALUES (%s, %s, %s, %s)",
+            (device_id, label, token_hash, _utcnow()),
+        )
+
+
+def revoke_device(device_id: str) -> bool:
+    """Revoke a device's token. True if an active device was revoked."""
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE api_device SET revoked_at = %s WHERE device_id = %s AND revoked_at IS NULL",
+            (_utcnow(), device_id),
+        )
+        return cur.rowcount > 0
+
+
+def list_devices() -> list[dict]:
+    with _cursor() as cur:
+        cur.execute(
+            "SELECT device_id, label, created_at, revoked_at, last_seen_at "
+            "FROM api_device ORDER BY created_at"
+        )
+        return [
+            {k: (_iso(v) if isinstance(v, datetime) else v) for k, v in r.items()}
+            for r in cur.fetchall()
+        ]
+
+
+def device_for_token_hash(token_hash: str) -> dict | None:
+    """The active (non-revoked) device owning this token hash, if any."""
+    with _cursor() as cur:
+        cur.execute(
+            "SELECT device_id, label FROM api_device "
+            "WHERE token_hash = %s AND revoked_at IS NULL",
+            (token_hash,),
+        )
+        return cur.fetchone()
+
+
+def touch_device(device_id: str) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE api_device SET last_seen_at = %s WHERE device_id = %s",
+            (_utcnow(), device_id),
+        )
+
+
+def scan_exists(session_id: str, gtin: str) -> bool:
+    return find_scan(session_id, gtin) is not None
+
+
+def _owned_session_row(cur: psycopg.Cursor, session_id: str, device_id: str) -> dict:
+    """Lock and return the session row, or raise SyncRejected if it is
+    missing or belongs to another device (or to the Streamlit app, which
+    leaves device_id NULL)."""
+    cur.execute(
+        "SELECT device_id, status FROM session WHERE session_id = %s FOR UPDATE",
+        (session_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        raise SyncRejected("unknown_session")
+    if row["device_id"] != device_id:
+        raise SyncRejected("session_not_owned")
+    return row
+
+
+def apply_create_session(
+    device_id: str,
+    session_id: str,
+    sanford_id: str,
+    location: str,
+    created_at: datetime,
+) -> str:
+    """Create a device-owned session with a device-minted id. Re-sending the
+    same create is a no-op (SYNC_DUPLICATE); an id already used by another
+    device or by the Streamlit app is rejected."""
+    with _cursor() as cur:
+        cur.execute(
+            "INSERT INTO session (session_id, sanford_id, location, status, "
+            "created_at, ended_at, device_id) VALUES (%s, %s, %s, %s, %s, NULL, %s) "
+            "ON CONFLICT (session_id) DO NOTHING",
+            (session_id, sanford_id, location, STATUS_ACTIVE, created_at, device_id),
+        )
+        if cur.rowcount == 1:
+            return SYNC_APPLIED
+        _owned_session_row(cur, session_id, device_id)
+        return SYNC_DUPLICATE
+
+
+def apply_scan_op(
+    device_id: str,
+    op_id: str,
+    session_id: str,
+    gtin: str,
+    result: dict | None,
+    at: datetime,
+) -> str:
+    """Apply one queued scan exactly once.
+
+    `result` is the server-resolved record for a GTIN not yet in the session
+    (see sync_api/sync.py); it may be None only when the caller saw the GTIN
+    already present, in which case this is a rescan and just bumps the count.
+    The session row lock serialises concurrent syncs of the same session.
+    """
+    with _cursor() as cur:
+        _owned_session_row(cur, session_id, device_id)
+        cur.execute(
+            "INSERT INTO sync_scan_op (device_id, op_id, session_id, applied_at) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+            (device_id, op_id, session_id, _utcnow()),
+        )
+        if cur.rowcount == 0:
+            return SYNC_DUPLICATE
+        cur.execute(
+            "UPDATE scan SET scan_count = scan_count + 1, "
+            "last_scanned = GREATEST(last_scanned, %s), "
+            "scanned_at = LEAST(scanned_at, %s) "
+            "WHERE session_id = %s AND gtin = %s",
+            (at, at, session_id, gtin),
+        )
+        if cur.rowcount == 1:
+            return SYNC_APPLIED
+        if result is None:
+            raise SyncRetry("scan disappeared between check and apply")
+        _insert_scan(cur, session_id, result, at)
+        return SYNC_APPLIED
+
+
+def apply_end_session_op(device_id: str, session_id: str, at: datetime) -> str:
+    with _cursor() as cur:
+        row = _owned_session_row(cur, session_id, device_id)
+        if row["status"] != STATUS_ACTIVE:
+            return SYNC_DUPLICATE
+        cur.execute(
+            "UPDATE session SET status = %s, ended_at = %s WHERE session_id = %s",
+            (STATUS_ENDED, at, session_id),
+        )
+        return SYNC_APPLIED
 
 
 # ── Retention ────────────────────────────────────────────────────────────────

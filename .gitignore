@@ -37,3 +37,10 @@ graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
 
 # macOS
 .DS_Store
+
+# Android client (android/)
+android/.gradle/
+android/**/build/
+android/local.properties
+android/.idea/
+*.iml

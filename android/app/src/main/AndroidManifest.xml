@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:name=".GtinScannerApp"
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+
+        <!-- Lets an MDM push the sync URL and device token (Managed Configuration). -->
+        <meta-data
+            android:name="android.content.APP_RESTRICTIONS"
+            android:resource="@xml/app_restrictions" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="stateHidden|adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
