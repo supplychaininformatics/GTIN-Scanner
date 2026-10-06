@@ -110,5 +110,5 @@ streamlit==1.64.0
 toml==0.10.2
 typing_extensions==4.16.0
 urllib3==2.8.0
-uvicorn==0.53.0
+uvicorn==0.54.0
 websockets==16.1.1
