@@ -45,7 +45,7 @@
 GitPython==3.1.62
 Jinja2==3.1.6
 MarkupSafe==3.0.3
-PyJWT==2.14.0
+PyJWT==2.15.0
 Pygments==2.21.0
 altair==6.3.0
 anyio==4.15.1
