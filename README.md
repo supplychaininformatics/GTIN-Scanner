@@ -337,27 +337,14 @@ the same Azure AD tenant as the Fabric connection. That would replace the
 completed OAuth flow; `core/admin.py::is_admin()`'s allowlist check itself
 wouldn't need to change.
 
-### 1. Fill in `.streamlit/secrets.toml`
+### 1. Allowlist (no secrets needed)
 
-This is the same file created in Setup step 5 for the Neon connection string
-— don't re-run the `cp` from that step here, it would overwrite the `[neon]`
-URL you already filled in. Just add the `[admin]` block to the existing file
-(or create it from the template if you skipped that step):
-
-```bash
-[ -f .streamlit/secrets.toml ] || cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-```
-
-List who's allowed to refresh:
-
-```toml
-[admin]
-allowed_emails = ["manager1@example.org", "supervisor2@example.org"]
-# allowed_domains = ["example.org"]   # optional: grant a whole group by domain
-```
-
-This file is git-ignored (like `data/cache/`) — without it, the allowlist is
-empty and every typed email is denied (and logged as such).
+The Monitor Board and Admin pages share one hardcoded allowlist,
+`ALLOWED_EMAILS` in `core/admin.py`, currently just
+`supplychaininformatics@sanfordhealth.org`. To grant someone access, add their
+address to that set and deploy. There is no `[admin]` block in
+`.streamlit/secrets.toml` any more — `allowed_emails` / `allowed_domains`
+there are ignored, and domain-wide grants are no longer supported.
 
 ### 2. Run it
 
@@ -412,22 +399,20 @@ psql "$NEON_DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/004_usage_dashboard.s
 
 The dashboard sits behind the same typed-email allowlist as the admin/board
 pages, *plus* a second check against a single `owner_email` — other
-supervisors on `[admin] allowed_emails` don't see this page even though they
-can reach the admin/board pages. See `core/admin.py`'s module docstring for
+addresses on `ALLOWED_EMAILS` don't see this page even though they can reach
+the admin/board pages. See `core/admin.py`'s module docstring for
 the allowlist's own limits (typed-email, not verified identity) — the same
 caveat applies here.
 
-Add the owner's email to the same `.streamlit/secrets.toml` from the Admin
-Refresh Page setup above:
+Add the owner's email to the `.streamlit/secrets.toml` from Setup step 5:
 
 ```toml
 [dashboard]
 owner_email = "you@example.org"
 ```
 
-`owner_email` must also be covered by `[admin] allowed_emails` or
-`allowed_domains` — the dashboard checks the general admin gate first, then
-this one.
+`owner_email` must also be in `ALLOWED_EMAILS` (`core/admin.py`) — the
+dashboard checks the general admin gate first, then this one.
 
 ### Enabling the nightly rollup
 

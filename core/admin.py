@@ -119,23 +119,9 @@ def _read_encrypted(path, default):
         return default
 
 
-def _allowed_emails() -> frozenset[str]:
-    """Admin allowlist, lower-cased, from .streamlit/secrets.toml [admin]."""
-    try:
-        emails = st.secrets["admin"]["allowed_emails"]
-    except (KeyError, FileNotFoundError):
-        return frozenset()
-    return frozenset(e.strip().lower() for e in emails if e.strip())
-
-
-def _allowed_domains() -> frozenset[str]:
-    """Optional email-domain allowlist (e.g. 'sanfordhealth.org') so a whole
-    group can be granted access without listing every address individually."""
-    try:
-        domains = st.secrets["admin"]["allowed_domains"]
-    except (KeyError, FileNotFoundError):
-        return frozenset()
-    return frozenset(d.strip().lower().lstrip("@") for d in domains if d.strip())
+# Hardcoded allowlist (add addresses here). Replaces the old secrets.toml
+# [admin] allowed_emails / allowed_domains settings, which are now ignored.
+ALLOWED_EMAILS = frozenset({"supplychaininformatics@sanfordhealth.org"})
 
 
 def is_admin(email: str) -> bool:
@@ -148,10 +134,7 @@ def is_admin(email: str) -> bool:
     email = (email or "").strip().lower()
     if not email:
         return False
-    if email in _allowed_emails():
-        return True
-    domain = email.rsplit("@", 1)[-1]
-    return domain in _allowed_domains()
+    return email in ALLOWED_EMAILS
 
 
 def log_audit_event(event: str, email: str, **extra: object) -> None:
@@ -252,10 +235,7 @@ def render_access_gate(page_label: str) -> str | None:
         return st.session_state[_SESSION_KEY]
 
     st.markdown(f"### {page_label} Access")
-    st.write(
-        "This page is restricted to managers and supervisors. Enter your "
-        "email to continue — every attempt is logged."
-    )
+    st.write("This page can be accessed by Sanford Supply Chain Informatics.")
     with st.form(f"{page_label.lower().replace(' ', '_')}_access_form"):
         typed_email = st.text_input(
             "Email", placeholder="you@example.org", label_visibility="collapsed"
@@ -270,9 +250,5 @@ def render_access_gate(page_label: str) -> str | None:
             st.rerun()
         else:
             log_audit_event("access_denied", candidate, page=page_label)
-            st.error(
-                "That email isn't on the admin allowlist. Ask Supply Chain "
-                "Informatics to add you to allowed emails (or your group's "
-                "domain to allowed emails)."
-            )
+            st.error("That email isn't on the allowlist.")
     return None

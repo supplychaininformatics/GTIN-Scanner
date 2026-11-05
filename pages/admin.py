@@ -10,8 +10,7 @@ passive 24h cache. See core/admin.py for the allowlist and
 cache-invalidation logic this page is a thin UI wrapper around.
 
 Access is a typed-email allowlist, not a verified login: a visitor enters
-their email, and it's checked against [admin] allowed_emails /
-allowed_domains in .streamlit/secrets.toml. This is the software equivalent
+their email, and it's checked against ALLOWED_EMAILS in core/admin.py. This is the software equivalent
 of a sign-in sheet — it only gates access as long as the allowlist stays
 private and specific, since anyone who learns an allowlisted address could
 type it in. Every attempt (granted or denied) and every refresh is written
