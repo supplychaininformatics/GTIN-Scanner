@@ -80,6 +80,40 @@ init_session()
 def _get_engine_lazy():
     return get_lookup_engine()
 
+# The ?sid URL param alone doesn't survive Back navigation or closing the
+# browser — the app is then reopened at its bare URL. The id is also kept in
+# the browser's localStorage (same-origin from the components iframe), which
+# does survive both, and the start gate uses it to send the picker back into
+# their session. Entries older than the TTL are ignored so a device left idle
+# overnight lands on a fresh start gate.
+_SID_STORAGE_KEY = "gtin_scanner_sid"
+_SID_STORAGE_TTL_MS = 12 * 60 * 60 * 1000
+
+
+def _saved_sid_script(action: str) -> None:
+    """Emit a zero-height script that clears or restores the saved sid.
+    (Saving happens in the start-form redirect script, which must not race it.)"""
+    if action == "clear":
+        body = f'ls.removeItem("{_SID_STORAGE_KEY}");'
+    else:  # restore
+        body = f"""
+            var raw = ls.getItem("{_SID_STORAGE_KEY}");
+            if (raw) {{
+                var saved = JSON.parse(raw);
+                if (saved.sid && Date.now() - saved.ts < {_SID_STORAGE_TTL_MS}) {{
+                    window.parent.location.replace(
+                        window.parent.location.pathname + "?sid=" + encodeURIComponent(saved.sid)
+                    );
+                }} else {{
+                    ls.removeItem("{_SID_STORAGE_KEY}");
+                }}
+            }}"""
+    components.html(
+        f"<script>try {{ var ls = window.parent.localStorage; {body} }} catch (e) {{}}</script>",
+        height=0,
+    )
+
+
 # ── Pre-scan gate: capture Sanford ID + location once per browser session ─────
 # A resumed session (refresh, reconnect, server restart) carries its session id
 # in the URL — session_state itself may have been wiped, but the URL survives
@@ -119,8 +153,17 @@ if not st.session_state.session_id:
         else:
             # Reachable, and legitimately unknown/already-ended/purged —
             # drop the dead param and fall through to a normal start gate
-            # instead of looping on it.
+            # instead of looping on it. The saved copy must go too, or the
+            # restore script below would redirect straight back to it.
             del st.query_params["sid"]
+            st.session_state.clear_saved_sid = True
+
+    # No live session: either clear a stale saved id (session ended / dead), or
+    # try to restore one left by a previous tab/browser run.
+    if st.session_state.pop("clear_saved_sid", False):
+        _saved_sid_script("clear")
+    elif not st.query_params.get("sid"):
+        _saved_sid_script("restore")
 
     st.markdown(C.identity_header_html(page_name="Handheld"), unsafe_allow_html=True)
     # Set when a supervisor force-ended this device's session out from under it
@@ -163,6 +206,10 @@ if not st.session_state.session_id:
             # document the browser actually reloads.
             components.html(
                 f"""<script>
+                    try {{
+                        window.parent.localStorage.setItem("{_SID_STORAGE_KEY}",
+                            JSON.stringify({{sid: "{st.session_state.session_id}", ts: Date.now()}}));
+                    }} catch (e) {{}}
                     window.parent.location.replace(
                         window.parent.location.pathname + "?sid={st.session_state.session_id}"
                     );
@@ -226,6 +273,7 @@ if is_force_ended:
     st.session_state.scan_history = []
     st.session_state.last_result = None
     st.session_state.force_ended_notice = True
+    st.session_state.clear_saved_sid = True
     st.query_params.clear()
     st.rerun()
 
@@ -272,6 +320,7 @@ def _confirm_end_session() -> None:
     with end_col:
         if st.button("End Session", type="primary", use_container_width=True):
             end_session()
+            st.session_state.clear_saved_sid = True
             st.query_params.clear()
             st.rerun()
 
