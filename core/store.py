@@ -303,7 +303,7 @@ def force_end_session(session_id: str) -> bool:
     """Escape hatch for a dead/dropped handheld — board or admin only.
 
     Same effect as end_session(); the caller is responsible for writing an
-    audit log entry (see core/admin.log_audit_event, pages/admin.py), the
+    audit log entry (see core/admin.log_audit_event), the
     same pattern the existing manual-refresh audit trail uses.
 
     Returns:

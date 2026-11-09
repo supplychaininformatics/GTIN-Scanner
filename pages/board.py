@@ -4,7 +4,7 @@ pages/board.py
 Monitor master board — the passive, wide-layout surface described in
 PLAN.md. It never scans and never owns normal session lifecycle; its only
 lifecycle action is the force-end escape hatch for a dead/dropped handheld
-(mirrored in pages/admin.py — see core/store.force_end_session).
+(see core/store.force_end_session).
 
 Shows: the static app URL for device onboarding (provisioning/fallback, not
 per-session — see PLAN.md "Device onboarding"), today's sessions by default
@@ -55,9 +55,6 @@ if board_email is None:
     st.stop()
 
 store.purge_old_sessions()
-
-with st.container(key="sf_navlink"):
-    st.page_link("pages/admin.py", label="Admin Tools →", icon=None)
 
 # ── Device onboarding: static link, not per-session ─────────────────────────
 # See PLAN.md "Device onboarding": open this URL directly on the handheld's
