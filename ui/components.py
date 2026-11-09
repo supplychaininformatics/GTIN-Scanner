@@ -580,7 +580,7 @@ def session_list_table_html(sessions: list[dict]) -> str:
 
 
 def _wall_clock(iso_ts: str | None) -> str:
-    """Format a stored UTC ISO datetime for display. Mirrors
+    """Format a stored UTC ISO datetime as US Central for display. Mirrors
     core.session._wall_clock — duplicated here rather than imported so
     ui/components.py stays free of a core/ dependency (see ui/theme.py's
     "no other module may hardcode..." boundary: presentation doesn't reach
@@ -588,9 +588,13 @@ def _wall_clock(iso_ts: str | None) -> str:
     if not iso_ts:
         return ""
     try:
-        from datetime import datetime  # noqa: PLC0415
+        from datetime import UTC, datetime  # noqa: PLC0415
+        from zoneinfo import ZoneInfo  # noqa: PLC0415
 
-        return datetime.fromisoformat(iso_ts).strftime("%b %d, %H:%M:%S")
+        dt = datetime.fromisoformat(iso_ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(ZoneInfo("America/Chicago")).strftime("%b %d, %H:%M:%S")
     except (TypeError, ValueError):
         return iso_ts
 

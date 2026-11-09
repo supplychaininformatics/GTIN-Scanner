@@ -19,7 +19,8 @@ it on every resume rather than being its own source of truth.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -89,15 +90,19 @@ _STATUS_LABELS = {
     STATUS_NOT_FOUND: "❌ Not Found",
 }
 
+_DISPLAY_TZ = ZoneInfo("America/Chicago")
+
 
 def _wall_clock(iso_ts: str) -> str:
-    """Format a stored UTC ISO datetime for display, matching the legacy
-    `%H:%M:%S` look scans have always shown in the UI/export."""
+    """Format a stored UTC ISO datetime as US Central wall-clock time
+    (`%H:%M:%S`) for the UI/export. America/Chicago follows CST/CDT."""
     try:
         dt = datetime.fromisoformat(iso_ts)
     except (TypeError, ValueError):
         return iso_ts or ""
-    return dt.strftime("%H:%M:%S")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(_DISPLAY_TZ).strftime("%H:%M:%S")
 
 
 def _row_to_entry(row: dict) -> dict:
