@@ -1037,15 +1037,23 @@ _JS = r"""
   /* A tap on the field is a human asking to type. Drop inputmode and re-focus
      so the keyboard opens: the attribute is read when the field gains focus, so
      changing it on an already-focused field needs a blur/focus cycle. */
-  on(D, 'pointerdown', function (e) {
+  /* Runs on both pointerdown and click. Android Chrome only raises the soft
+     keyboard for a focus that happens inside a completed tap (click carries
+     the user activation; pointerdown does not), so doing it on pointerdown
+     alone left the keyboard closed on the handheld. */
+  function enableTyping(e) {
     var el = input();
     if (!el || !e.target || e.target !== el) return;
-    if (el.getAttribute('inputmode') !== 'none') return;
-    try { el.removeAttribute('inputmode'); } catch (err) {}
-    if (D.activeElement === el) {
-      try { el.blur(); el.focus({ preventScroll: true }); } catch (err) {}
+    if (el.getAttribute('inputmode') === 'none') {
+      try { el.removeAttribute('inputmode'); } catch (err) {}
+      try { el.blur(); } catch (err) {}
     }
-  }, true);
+    if (D.activeElement !== el) {
+      try { el.focus({ preventScroll: true }); } catch (err) {}
+    }
+  }
+  on(D, 'pointerdown', enableTyping, true);
+  on(D, 'click', enableTyping, true);
 
   /* Clicking dead space re-arms the gun. Controls and tables are left alone so
      the user can still press buttons and select text in order to read it. */
