@@ -25,18 +25,12 @@ import pandas as pd
 EXPORT_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Column order as originally written, plus Scan Count (see PLAN.md "Duplicate
-# handling"). Keys added for the UI only (status_key, on_hold, miss_reason —
-# the raw key behind the "Miss Reason" label) are deliberately absent, so the
-# exported sheet stays clean.
-#
-# Miss Reason / Miss Detail trail the original columns rather than sitting
-# beside `status`: both are blank on every contract hit, which is most rows,
-# and inserting two mostly-empty columns mid-sheet would push the item fields
-# people actually read off the first screen.
+# handling"). Keys added for the UI only (status_key, on_hold, Miss Reason,
+# Miss Detail) are deliberately absent, so the exported sheet stays clean.
 _COLUMNS = [
     "time", "source", "status", "Scan", "Item", "Company", "Brand",
     "Description", "GTIN", "GTIN UOM", "UOU", "HIBCC", "LAWSON ID", "Lawson UOM",
-    "Scan Count", "Miss Reason", "Miss Detail",
+    "Scan Count",
 ]
 
 _FILENAME_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
