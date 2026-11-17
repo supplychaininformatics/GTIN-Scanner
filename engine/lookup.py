@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import bisect
 import logging
+import re
 
 import pandas as pd
 
@@ -82,6 +83,29 @@ MISS_LABELS = {
 # noise floor rises with the number of indexed cores.
 LEAD_MIN_SHARED = 8
 
+# Excel renders a long digit string as "9.89803E+11" and a part number like
+# JUN-10 as a date. Both are unrecoverable, and the first one collides across
+# dozens of unrelated items, so such values are never indexed as catalog numbers.
+_SCI_NOTATION = re.compile(r"^\d+(\.\d+)?E\+\d+$", re.IGNORECASE)
+
+
+def _catalog_key(value: object) -> str:
+    """Manufacturer catalog number as an exact-match key: trimmed, upper-cased.
+
+    '' for blanks and for values that look Excel-mangled (see _SCI_NOTATION).
+    """
+    if value is None or pd.isna(value):
+        return ""
+    text = str(value).strip().upper()
+    if not text or _SCI_NOTATION.match(text):
+        return ""
+    return text
+
+
+def _loose(text: str) -> str:
+    """Alphanumerics only, so 'AB-123' and 'AB 123' compare equal."""
+    return re.sub(r"[^A-Z0-9]", "", text)
+
 
 class LookupEngine:
     """In-memory GTIN lookup backed by a pre-built dict index.
@@ -118,6 +142,7 @@ class LookupEngine:
             self._index.setdefault(alias, record)
 
         self._build_diagnostics()
+        self._build_catalog_index(df)
 
         logger.debug("LookupEngine index built with %d entries.", len(self._index))
 
@@ -148,6 +173,69 @@ class LookupEngine:
             self._by_core.setdefault(core(norm), []).append((norm, record))
 
         self._sorted_cores: list[str] = sorted(self._by_core)
+
+    def _build_catalog_index(self, df: pd.DataFrame) -> None:
+        """Index contract-line records by manufacturer catalog number.
+
+        Two keys per record (vendor_item and manufacturer_number), each in an
+        exact and an alphanumerics-only form. Used only by find_by_catalog().
+        """
+        self._by_catalog: dict[str, list[dict]] = {}
+        self._by_catalog_loose: dict[str, list[dict]] = {}
+        for record in df.to_dict("records"):
+            for col in ("vendor_item", "manufacturer_number"):
+                key = _catalog_key(record.get(col))
+                if not key:
+                    continue
+                self._by_catalog.setdefault(key, []).append(record)
+                loose = _loose(key)
+                if loose:
+                    self._by_catalog_loose.setdefault(loose, []).append(record)
+
+    @staticmethod
+    def _same_maker(record: dict, company: str) -> bool:
+        """Loose check that a record's manufacturer is the one named in `company`."""
+        company = company.upper()
+        for col in ("manufacturer_name", "manufacturer_code"):
+            value = record.get(col)
+            if value is None or pd.isna(value):
+                continue
+            first = str(value).strip().upper().split(" ")[0]
+            if len(first) >= 3 and first in company:
+                return True
+        return False
+
+    def find_by_catalog(self, catalog_number: str, company: str = "") -> list[dict]:
+        """Contract-line records for a manufacturer catalog number, one per Lawson item.
+
+        Advisory, for resolving a Lawson item after a goodID hit. This is NOT a
+        GTIN match: a catalog number can be shared by an each, a box and a case,
+        and (rarely) by two manufacturers. Callers must surface every candidate
+        rather than pick one.
+
+        Tries the exact (case-insensitive) number first, then ignoring
+        punctuation/spaces. When several items match and `company` is given,
+        narrows to those whose manufacturer appears in it, but only if that
+        leaves at least one.
+        """
+        key = _catalog_key(catalog_number)
+        if not key:
+            return []
+        matches = self._by_catalog.get(key) or self._by_catalog_loose.get(_loose(key)) or []
+
+        by_item: dict[str, dict] = {}
+        for record in matches:
+            item = record.get("item_number")
+            if item is None or pd.isna(item) or not str(item).strip():
+                continue
+            by_item.setdefault(str(item).strip(), record)
+        found = list(by_item.values())
+
+        if len(found) > 1 and company:
+            narrowed = [r for r in found if self._same_maker(r, company)]
+            if narrowed:
+                found = narrowed
+        return found
 
     def _closest_core(self, body: str) -> tuple[int, str]:
         """Closest known core to `body`, as (shared leading digits, that core).

@@ -258,6 +258,7 @@ def resolve_scan(
         if after_api is not None:
             after_api()
 
+    lawson_match = None
     if api_result.success:
         status_label = _LABEL_API
         status_key = STATUS_API
@@ -296,6 +297,15 @@ def resolve_scan(
             "LAWSON ID": "-",
             "Lawson UOM": "-",
         }
+        # GUDID knows nothing about Lawson. Resolve it from the catalog number
+        # instead: advisory, so every candidate is shown rather than one picked.
+        lawson_items = [
+            str(r["item_number"]).strip()
+            for r in engine.find_by_catalog(full_record["Item"], full_record["Company"])
+        ]
+        if lawson_items:
+            full_record["LAWSON ID"] = " / ".join(lawson_items)
+            lawson_match = "catalog"
     else:
         status_label = _LABEL_NOT_FOUND
         status_key = STATUS_NOT_FOUND
@@ -316,6 +326,8 @@ def resolve_scan(
         "status_key": status_key,
         "status_label": status_label,
         "source_label": "goodID API",
+        # "catalog" when LAWSON ID came from the catalog number, not the GTIN.
+        "lawson_match": lawson_match,
         # Stored raw (not the display label) so the column stays aggregatable
         # in SQL — the whole point is being able to count the buckets. The
         # human label is derived at read time, exactly as `status` is derived
