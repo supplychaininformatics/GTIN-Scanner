@@ -73,3 +73,13 @@ def test_blank_and_unknown():
     e = _engine([{"item_number": "1", "vendor_item": "P1", "global_trade_item_number": "1"}])
     assert e.find_by_catalog("") == []
     assert e.find_by_catalog("NOPE") == []
+
+
+def test_catalog_uoms_reports_agreement_across_rows():
+    e = _engine([
+        {"item_number": "1", "vendor_item": "P1", "uom_unit_of_measure": "BX", "global_trade_item_number": "1"},
+        {"item_number": "1", "vendor_item": "P1", "uom_unit_of_measure": "CA", "global_trade_item_number": "2"},
+        {"item_number": "2", "vendor_item": "P2", "uom_unit_of_measure": "EA", "global_trade_item_number": "3"},
+    ])
+    assert e.find_by_catalog("P1")[0]["catalog_uoms"] == {"BX", "CA"}
+    assert e.find_by_catalog("P2")[0]["catalog_uoms"] == {"EA"}

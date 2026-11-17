@@ -224,12 +224,22 @@ class LookupEngine:
         matches = self._by_catalog.get(key) or self._by_catalog_loose.get(_loose(key)) or []
 
         by_item: dict[str, dict] = {}
+        uoms: dict[str, set[str]] = {}
         for record in matches:
             item = record.get("item_number")
             if item is None or pd.isna(item) or not str(item).strip():
                 continue
-            by_item.setdefault(str(item).strip(), record)
-        found = list(by_item.values())
+            item = str(item).strip()
+            by_item.setdefault(item, record)
+            uom = record.get("uom_unit_of_measure")
+            uoms.setdefault(item, set()).add(
+                "" if uom is None or pd.isna(uom) else str(uom).strip()
+            )
+        # Copies, so the index is never mutated. `catalog_uoms` lets the caller
+        # tell whether the item's rows agree on the GTIN UOM.
+        found = [
+            {**record, "catalog_uoms": uoms[item]} for item, record in by_item.items()
+        ]
 
         if len(found) > 1 and company:
             narrowed = [r for r in found if self._same_maker(r, company)]

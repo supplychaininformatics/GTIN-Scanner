@@ -299,13 +299,21 @@ def resolve_scan(
         }
         # GUDID knows nothing about Lawson. Resolve it from the catalog number
         # instead: advisory, so every candidate is shown rather than one picked.
-        lawson_items = [
-            str(r["item_number"]).strip()
-            for r in engine.find_by_catalog(full_record["Item"], full_record["Company"])
-        ]
-        if lawson_items:
-            full_record["LAWSON ID"] = " / ".join(lawson_items)
+        candidates = engine.find_by_catalog(full_record["Item"], full_record["Company"])
+        if candidates:
+            full_record["LAWSON ID"] = " / ".join(
+                str(r["item_number"]).strip() for r in candidates
+            )
             lawson_match = "catalog"
+        if len(candidates) == 1:
+            # One Lawson item: its low-UOM fields are unambiguous. GTIN UOM is
+            # per row, so it is only filled when every row of the item agrees.
+            fields = contract_display_fields(candidates[0])
+            full_record["UOU"] = fields["UOU"]
+            full_record["Lawson UOM"] = fields["Lawson UOM"]
+            uoms = candidates[0].get("catalog_uoms") or set()
+            if len(uoms) == 1 and fields["GTIN UOM"] != _MISSING:
+                full_record["GTIN UOM"] = fields["GTIN UOM"]
     else:
         status_label = _LABEL_NOT_FOUND
         status_key = STATUS_NOT_FOUND
