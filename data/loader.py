@@ -209,6 +209,30 @@ FROM {table}
 WHERE active = 1
 """
 
+# Item master GTIN table: one row per (item, GTIN), including barcodes the
+# contract_line table's `gtin` / `base_uom_gtin` cells never carry. Folded into
+# the contract DataFrame at load time (see _merge_item_gtin), so the cache, the
+# lookup engine and the Android mirror all see a single dataset and a scan still
+# costs one dict lookup.
+DEFAULT_ITEM_GTIN_TABLE = "[Silver_Lake].[infor].[item_gtin]"
+
+_ITEM_GTIN_SQL_TEMPLATE = """
+SELECT
+    item,
+    description_short,
+    manuf_code,
+    manuf_item,
+    uom,
+    gtin,
+    gtin_type
+FROM {table}
+WHERE active = 1
+"""
+
+# Value of the `gtin_source` column on rows that exist only because item_gtin
+# supplied their barcode. core.lookup keys the "Item Master" source label off it.
+GTIN_SOURCE_ITEM_GTIN = "item_gtin"
+
 # Columns the lakehouse has that this app deliberately does NOT select, and
 # strips if an older local dataset still carries them (see _RETIRED_COLUMNS use
 # in _load_mock_from_excel):
@@ -244,6 +268,126 @@ def _contract_line_query() -> str:
             "Expected something like 'schema.table' or 'db.schema.table'."
         )
     return _SQL_TEMPLATE.format(table=table)
+
+
+def _item_gtin_query() -> str:
+    """Build the item_gtin query against the configured lakehouse table."""
+    table = os.getenv("FABRIC_ITEM_GTIN_TABLE", DEFAULT_ITEM_GTIN_TABLE).strip()
+    if not _IDENTIFIER_RE.match(table):
+        raise ValueError(
+            f"FABRIC_ITEM_GTIN_TABLE={table!r} is not a valid SQL object name. "
+            "Expected something like 'schema.table' or 'db.schema.table'."
+        )
+    return _ITEM_GTIN_SQL_TEMPLATE.format(table=table)
+
+
+def _fetch_item_gtin(cursor) -> pd.DataFrame | None:
+    """Run the item_gtin query, or return None if it cannot be had.
+
+    The item master is an enrichment: the contract data alone is a complete,
+    working dataset. So any failure here (table renamed, permission denied, a
+    column missing) is logged and swallowed, and the app carries on exactly as
+    it did before item_gtin existed, rather than failing the whole refresh.
+    """
+    try:
+        cursor.execute(_item_gtin_query())
+        columns = [col[0] for col in cursor.description]
+        rows = [tuple(row) for row in cursor.fetchall()]
+    except Exception:  # noqa: BLE001 - deliberately broad, see docstring
+        logger.exception("Could not load item_gtin; continuing with contract lines only.")
+        return None
+    return pd.DataFrame.from_records(rows, columns=columns)
+
+
+def _blank(value: object) -> str:
+    """A cell as stripped text, '' for NULL/NaN/'nan'/'none'."""
+    if value is None or (not isinstance(value, str) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() in ("nan", "none") else text
+
+
+def _merge_item_gtin(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.DataFrame:
+    """Add a row per item_gtin barcode that contract_line cannot already resolve.
+
+    Precedence is strict: a GTIN already present in contract_line's `gtin` or
+    `base_uom_gtin` is left alone, so nothing that resolved before resolves
+    differently now. Only barcodes that were previously misses gain a row.
+
+    Each added row is a copy of the item's contract line, so Company, hold flag,
+    UOU and the full description come from the contract. The barcode-specific
+    facts come from item_gtin, because they describe this barcode and not the
+    contract line:
+
+      * the GTIN itself, and `uom` (the unit this barcode identifies),
+      * `manuf_item`, shown as both Item and Brand, which is what the goodID
+        path shows for the same product (its versionModelNumber),
+      * `gtin_source`, which marks the row as an item-master hit.
+
+    When an item has several contract lines (one per UOM) the line whose
+    `contract_uom` equals the barcode's `uom` wins, then any non-hold line,
+    then the first. An item with no active contract line still gets a row, built
+    from item_gtin alone: the Lawson item number is the point of the fallback,
+    and Company / UOM / hold simply stay blank.
+    """
+    if item_gtin is None or item_gtin.empty:
+        return contract
+
+    known = {
+        g
+        for col in ("global_trade_item_number", "low_uom_code_gtin")
+        if col in contract.columns
+        for g in map(_blank, contract[col])
+        if g
+    }
+
+    by_item: dict[str, list[dict]] = {}
+    for record in contract.to_dict("records"):
+        by_item.setdefault(_blank(record.get("item_number")), []).append(record)
+
+    added: list[dict] = []
+    for ig in item_gtin.to_dict("records"):
+        gtin = _blank(ig.get("gtin"))
+        if not gtin or gtin in known:
+            continue
+        known.add(gtin)  # first item_gtin row for a barcode wins
+
+        item = _blank(ig.get("item"))
+        uom = _blank(ig.get("uom"))
+        manuf_item = _blank(ig.get("manuf_item"))
+        candidates = by_item.get(item, [])
+
+        if candidates:
+            same_uom = [c for c in candidates if _blank(c.get("uom_unit_of_measure")) == uom]
+            pool = same_uom or candidates
+            base = next((c for c in pool if not c.get("on_hold")), pool[0])
+            row = dict(base)
+        else:
+            row = {
+                "item_number": item,
+                "item_description": _blank(ig.get("description_short")),
+                "manufacturer_code": _blank(ig.get("manuf_code")),
+                "on_hold": False,
+            }
+
+        row["global_trade_item_number"] = gtin
+        row["low_uom_code_gtin"] = None  # the barcode is this row's primary key
+        if uom:
+            row["uom_unit_of_measure"] = uom
+        if manuf_item:
+            row["vendor_item"] = manuf_item
+            row["manufacturer_number"] = manuf_item
+        row["gtin_source"] = GTIN_SOURCE_ITEM_GTIN
+        added.append(row)
+
+    if not added:
+        return contract
+
+    merged = pd.concat([contract, pd.DataFrame(added)], ignore_index=True)
+    merged["gtin_source"] = merged["gtin_source"].fillna("contract")
+    merged["on_hold"] = _coerce_bool(merged["on_hold"])
+    logger.info("Added %d barcode(s) from item_gtin to %d contract lines.", len(added), len(contract))
+    return merged
 
 
 def _fabric_connection_string() -> str:
@@ -538,6 +682,7 @@ def _load_from_lakehouse() -> pd.DataFrame:
         cursor.execute(_contract_line_query())
         columns = [col[0] for col in cursor.description]
         rows = [tuple(row) for row in cursor.fetchall()]
+        item_gtin = _fetch_item_gtin(cursor)
     finally:
         conn.close()
 
@@ -555,6 +700,10 @@ def _load_from_lakehouse() -> pd.DataFrame:
     df["on_hold"] = _coerce_bool(df["on_hold"])
 
     logger.info("Loaded %d contract lines from Fabric Lakehouse.", len(df))
+
+    if item_gtin is not None:
+        item_gtin["gtin"] = item_gtin["gtin"].astype(str)  # same leading-zero rule as above
+        df = _merge_item_gtin(df, item_gtin)
     return df
 
 
@@ -1000,7 +1149,55 @@ def _load_mock_from_excel() -> pd.DataFrame:
     )
 
     logger.info("Loaded %d contract lines from %s.", len(df), dataset_path.name)
-    return df
+    return _merge_item_gtin(df, _load_mock_item_gtin())
+
+
+_MOCK_ITEM_GTIN_CANDIDATES = tuple(
+    _MOCK_DATA_DIR / f"item_gtin{ext}" for ext in (".parquet", ".csv", ".xlsx")
+) + tuple(Path.home() / "Downloads" / f"item_gtin{ext}" for ext in (".csv", ".xlsx"))
+
+
+def _load_mock_item_gtin() -> pd.DataFrame | None:
+    """The item_gtin export for the mock path, or None if there isn't one.
+
+    Same role as _fetch_item_gtin on the Fabric path: an optional enrichment, so
+    a missing or unreadable file means "contract lines only", never a failed
+    load. Expects the lakehouse column names (item, gtin, manuf_item, uom,
+    description_short, manuf_code, gtin_type, active), as a CSV, Excel or
+    Parquet export of the table. MOCK_ITEM_GTIN_PATH overrides the search.
+    """
+    override = os.getenv("MOCK_ITEM_GTIN_PATH", "").strip()
+    if override:
+        path = Path(override).expanduser()
+        if not path.exists():
+            logger.warning("MOCK_ITEM_GTIN_PATH=%s does not exist. Ignoring it.", path)
+            path = None
+    else:
+        path = next((p for p in _MOCK_ITEM_GTIN_CANDIDATES if p.exists()), None)
+    if path is None:
+        return None
+
+    try:
+        suffix = path.suffix.lower()
+        if suffix == ".parquet":
+            ig = pd.read_parquet(path)
+        elif suffix == ".csv":
+            ig = pd.read_csv(path, dtype=str)  # str: GTINs must keep leading zeros
+        else:
+            ig = pd.read_excel(path, dtype=str)
+        ig.columns = [str(c).strip().lower() for c in ig.columns]
+        missing = {"item", "gtin"} - set(ig.columns)
+        if missing:
+            raise ValueError(f"missing required column(s): {sorted(missing)}")
+        if "active" in ig.columns:
+            ig = ig[_coerce_bool(ig["active"])]
+        ig["gtin"] = ig["gtin"].astype(str)
+    except Exception:  # noqa: BLE001 - an optional file must not break the load
+        logger.exception("Could not read %s; continuing with contract lines only.", path)
+        return None
+
+    logger.info("Loaded %d item_gtin rows from %s.", len(ig), path.name)
+    return ig
 
 # ─── Public Router ────────────────────────────────────────────────────────────
 

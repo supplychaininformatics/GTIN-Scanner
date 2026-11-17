@@ -197,7 +197,13 @@ def resolve_scan(
             # stays "✅ Found" exactly as before.
             "status_key": STATUS_HOLD if on_hold else STATUS_CACHE,
             "status_label": _LABEL_CACHE,
-            "source_label": "Contract Line",
+            # A barcode that contract_line did not carry but the item master
+            # did (see data.loader._merge_item_gtin). Same status as any other
+            # contract hit; only the label differs, so the Excel `source`
+            # column and the usage stats can count them separately.
+            "source_label": (
+                "Item Master" if record.get("gtin_source") == "item_gtin" else "Contract Line"
+            ),
         }
 
     # ── goodID API fallback ───────────────────────────────────────────────────
