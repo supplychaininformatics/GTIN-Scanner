@@ -350,6 +350,41 @@ def _infer_base_uom(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.DataF
     return contract
 
 
+# `gtin_source` of a row that carries only a catalog number (no barcode).
+GTIN_SOURCE_ITEM_GTIN_CATALOG = "item_gtin_catalog"
+
+
+def _catalog_alias(ig: dict, by_item: dict[str, list[dict]], seen: set[tuple[str, str]]) -> dict | None:
+    """A barcode-less row that makes an item_gtin `manuf_item` searchable, or None.
+
+    Only for an item that has a contract line, and only when none of that
+    item's lines already carries the number as vendor_item / manufacturer_number
+    (compared case-insensitively), so nothing is added that the catalog lookup
+    could not already find. The row has no GTIN, so it can never match a scan
+    and never reaches the on-device barcode mirror.
+    """
+    item = _blank(ig.get("item"))
+    manuf_item = _blank(ig.get("manuf_item"))
+    candidates = by_item.get(item)
+    if not item or not manuf_item or not candidates:
+        return None
+    key = (item, manuf_item.upper())
+    if key in seen:
+        return None
+    seen.add(key)
+    for c in candidates:
+        for col in ("vendor_item", "manufacturer_number"):
+            if _blank(c.get(col)).upper() == manuf_item.upper():
+                return None
+    row = dict(candidates[0])
+    row["global_trade_item_number"] = None
+    row["low_uom_code_gtin"] = None
+    row["vendor_item"] = manuf_item
+    row["manufacturer_number"] = manuf_item
+    row["gtin_source"] = GTIN_SOURCE_ITEM_GTIN_CATALOG
+    return row
+
+
 def _merge_item_gtin(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.DataFrame:
     """Add a row per item_gtin barcode that contract_line cannot already resolve.
 
@@ -391,9 +426,17 @@ def _merge_item_gtin(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.Data
         by_item.setdefault(_blank(record.get("item_number")), []).append(record)
 
     added: list[dict] = []
+    catalog_aliases: list[dict] = []
+    seen_catalog: set[tuple[str, str]] = set()
     for ig in item_gtin.to_dict("records"):
         gtin = _blank(ig.get("gtin"))
         if not gtin or gtin in known:
+            # No new barcode row, but the item master's catalog number for this
+            # item may still be one the contract lines don't carry. Keep it
+            # searchable so a goodID hit on that number can find the Lawson item.
+            alias = _catalog_alias(ig, by_item, seen_catalog)
+            if alias:
+                catalog_aliases.append(alias)
             continue
         known.add(gtin)  # first item_gtin row for a barcode wins
 
@@ -425,6 +468,7 @@ def _merge_item_gtin(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.Data
         row["gtin_source"] = GTIN_SOURCE_ITEM_GTIN
         added.append(row)
 
+    added += catalog_aliases
     if not added:
         return contract
 

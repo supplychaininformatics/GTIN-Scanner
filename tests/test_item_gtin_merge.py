@@ -201,3 +201,21 @@ def test_inactive_item_master_rows_do_not_infer_a_base_uom():
     ig = _item_gtin([{"item": "1", "uom": "EA", "gtin": "00000000000048", "active": "0"}])
     merged = loader._merge_item_gtin(contract, ig)
     assert loader._blank(merged.iloc[0]["low_uom_code_unit_of_measure"]) == ""
+
+
+def test_item_master_catalog_number_is_searchable_even_when_its_barcode_is_known():
+    contract = _contract([{
+        "item_number": "1", "vendor_item": "OLD-1", "uom_unit_of_measure": "EA",
+        "global_trade_item_number": "00000000000017",
+    }])
+    ig = _item_gtin([
+        {"item": "1", "manuf_item": "0037850", "uom": "EA", "gtin": "00000000000017"},  # barcode already known
+        {"item": "1", "manuf_item": "old-1", "uom": "EA", "gtin": "00000000000017"},    # already a vendor_item
+    ])
+    merged = loader._merge_item_gtin(contract, ig)
+    engine = LookupEngine(merged)
+
+    assert [r["item_number"] for r in engine.find_by_catalog("0037850")] == ["1"]
+    assert len(merged) == 2  # one alias row only; the case-variant duplicate adds nothing
+    assert engine.size == 1  # the alias has no barcode, so the GTIN index is unchanged
+    assert engine.search("00000000000017")["item_number"] == "1"
