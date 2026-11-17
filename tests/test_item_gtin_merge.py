@@ -174,3 +174,30 @@ def test_mock_item_gtin_absent_or_malformed_is_ignored(tmp_path, monkeypatch):
     bad.write_text("foo,bar\n1,2\n")
     monkeypatch.setenv("MOCK_ITEM_GTIN_PATH", str(bad))
     assert loader._load_mock_item_gtin() is None
+
+
+def test_blank_base_uom_inferred_as_ea_when_item_master_has_an_ea_row():
+    contract = _contract([
+        {"item_number": "1", "global_trade_item_number": "00000000000017", "uom_unit_of_measure": "CA"},
+        {"item_number": "2", "global_trade_item_number": "00000000000024", "uom_unit_of_measure": "CA"},
+        {"item_number": "3", "global_trade_item_number": "00000000000031", "low_uom_code_unit_of_measure": "PK"},
+    ])
+    ig = _item_gtin([
+        {"item": "1", "uom": "EA", "gtin": "00000000000048"},
+        {"item": "2", "uom": "BX", "gtin": "00000000000055"},   # no EA row: leave blank
+        {"item": "3", "uom": "EA", "gtin": "00000000000062"},   # source value wins
+    ])
+    merged = loader._merge_item_gtin(contract, ig)
+    by = {r["global_trade_item_number"]: r for r in merged.to_dict("records")}
+    assert by["00000000000017"]["low_uom_code_unit_of_measure"] == "EA"
+    assert by["00000000000017"]["base_uom_source"] == loader.BASE_UOM_INFERRED
+    assert loader._blank(by["00000000000024"]["low_uom_code_unit_of_measure"]) == ""
+    assert by["00000000000031"]["low_uom_code_unit_of_measure"] == "PK"
+    assert not by["00000000000031"]["base_uom_source"]
+
+
+def test_inactive_item_master_rows_do_not_infer_a_base_uom():
+    contract = _contract([{"item_number": "1", "global_trade_item_number": "00000000000017"}])
+    ig = _item_gtin([{"item": "1", "uom": "EA", "gtin": "00000000000048", "active": "0"}])
+    merged = loader._merge_item_gtin(contract, ig)
+    assert loader._blank(merged.iloc[0]["low_uom_code_unit_of_measure"]) == ""

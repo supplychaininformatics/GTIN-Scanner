@@ -307,6 +307,49 @@ def _blank(value: object) -> str:
     return "" if text.lower() in ("nan", "none") else text
 
 
+# Value of `base_uom_source` on rows whose blank base UOM was filled in here.
+BASE_UOM_INFERRED = "inferred_item_gtin"
+
+
+def _infer_base_uom(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.DataFrame:
+    """Fill a blank base UOM with 'EA' where the item master has an EA barcode.
+
+    `low_uom_code_unit_of_measure` (shown as UOU / Lawson UOM) is blank on about
+    a third of contract lines in the source. Where item_gtin carries an active
+    'EA' row for the item, EA is the item's base unit. Checked against items
+    whose base UOM is known, that rule was right for 99.9% of 53k items; the
+    looser "the item's only UOM" rule was 95%, so nothing else is inferred.
+
+    Filled rows are marked in `base_uom_source`, so inferred values stay
+    distinguishable from ones the source supplied.
+    """
+    if "low_uom_code_unit_of_measure" not in contract.columns or "uom" not in item_gtin.columns:
+        return contract
+    ig = item_gtin
+    if "active" in ig.columns:
+        ig = ig[_coerce_bool(ig["active"])]
+    ea_items = {
+        _blank(i) for i, u in zip(ig["item"], ig["uom"], strict=False) if _blank(u).upper() == "EA"
+    }
+    ea_items.discard("")
+    if not ea_items:
+        return contract
+
+    blank = contract["low_uom_code_unit_of_measure"].map(_blank) == ""
+    eligible = blank & contract["item_number"].map(_blank).isin(ea_items)
+    if not eligible.any():
+        return contract
+
+    contract = contract.copy()
+    contract["low_uom_code_unit_of_measure"] = contract["low_uom_code_unit_of_measure"].astype(object)
+    contract.loc[eligible, "low_uom_code_unit_of_measure"] = "EA"
+    if "base_uom_source" not in contract.columns:
+        contract["base_uom_source"] = None
+    contract.loc[eligible, "base_uom_source"] = BASE_UOM_INFERRED
+    logger.info("Inferred base UOM 'EA' for %d contract line(s) from item_gtin.", int(eligible.sum()))
+    return contract
+
+
 def _merge_item_gtin(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.DataFrame:
     """Add a row per item_gtin barcode that contract_line cannot already resolve.
 
@@ -332,6 +375,8 @@ def _merge_item_gtin(contract: pd.DataFrame, item_gtin: pd.DataFrame) -> pd.Data
     """
     if item_gtin is None or item_gtin.empty:
         return contract
+
+    contract = _infer_base_uom(contract, item_gtin)
 
     known = {
         g
